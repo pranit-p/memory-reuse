@@ -71,7 +71,8 @@ All CI checks must pass before a PR can be merged.
 2. Branch off `main`, use a descriptive branch name like `feat/redis-cluster` or `fix/ttl-overflow`.
 3. Keep commits focused. Use conventional commit messages (`feat:`, `fix:`, `docs:`, etc.).
 4. Fill in the PR template — describe what changed, why, and how it was tested.
-5. PRs require at least one approving review and a passing CI run.
+5. Add yourself to [CONTRIBUTORS.md](CONTRIBUTORS.md) in the same PR.
+6. PRs require an approving review from the maintainer and a passing CI run before merge.
 
 ---
 

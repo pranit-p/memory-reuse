@@ -224,7 +224,8 @@ python examples/langgraph_math_agent.py
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup,
-tests, and code-style guidelines.
+tests, and code-style guidelines, and [CONTRIBUTORS.md](CONTRIBUTORS.md) for the
+list of people who have helped build this project.
 
 ---
 
