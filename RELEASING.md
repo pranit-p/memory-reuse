@@ -4,9 +4,19 @@ This project publishes to PyPI automatically via GitHub Actions using
 [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) — no API
 tokens are stored as secrets.
 
+## Release policy
+
+- Merging a PR to `main` does **not** trigger a release. Changes accumulate on
+  `main` freely.
+- A release happens **only** when a maintainer pushes a version tag (`vX.Y.Z`).
+- Release when meaningful changes have landed — a notable feature, fix, or a
+  batch of merged PRs — not for every small commit.
+- Follow [Semantic Versioning](https://semver.org/): patch for fixes, minor for
+  backward-compatible features, major for breaking changes.
+
 ## One-time setup
 
-1. Create the project on PyPI (or reserve the name with a first manual upload).
+1. Create the project on PyPI (done — first release uploaded manually).
 2. On PyPI, go to the project's **Publishing** settings and add a trusted
    publisher:
    - Owner: `pranit-p`
@@ -14,6 +24,9 @@ tokens are stored as secrets.
    - Workflow: `publish.yml`
    - Environment: `pypi`
 3. In the GitHub repo settings, create an environment named `pypi`.
+4. (Optional but recommended) In the `pypi` environment settings, add yourself
+   as a **required reviewer** so every publish pauses for a manual approval
+   click before uploading to PyPI.
 
 ## Cutting a release
 
