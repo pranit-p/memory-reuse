@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from memory_reuse.backends.base import AbstractBackend
 from memory_reuse.exceptions import BackendConnectionError, BackendNotAvailableError
@@ -111,7 +111,11 @@ class RedisBackend(AbstractBackend):
         """
         client = await self._get_client()
         try:
-            return await client.get(key)
+            # The client is created with decode_responses=False, so values are
+            # always raw bytes (or None on a miss). Cast to satisfy the type
+            # checker, which infers the broader bytes | str | None union.
+            value = await client.get(key)
+            return cast("bytes | None", value)
         except Exception as exc:
             logger.error("RedisBackend: GET failed for key prefix '%s'", key[:8])
             raise BackendConnectionError("Redis GET operation failed") from exc
