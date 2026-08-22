@@ -230,4 +230,4 @@ tests, and code-style guidelines.
 
 ## License
 
-[MIT](LICENSE) © memory-reuse Contributors
+[MIT](LICENSE) © Pranit Pawar
