@@ -30,19 +30,34 @@ tokens are stored as secrets.
 
 ## Cutting a release
 
-1. Bump the version in **two** places:
-   - `pyproject.toml` → `[project] version`
-   - `memory_reuse/__init__.py` → `__version__`
-2. Move items from `[Unreleased]` to a new version section in `CHANGELOG.md`
-   with today's date.
-3. Commit and tag:
-   ```bash
-   git commit -am "release: v0.2.0"
-   git tag v0.2.0
-   git push origin main --tags
-   ```
-4. The `publish.yml` workflow builds the sdist + wheel, runs `twine check`, and
-   uploads to PyPI.
+Use the release helper script — it bumps the version in both files, updates
+the CHANGELOG, and (optionally) commits, tags, and pushes.
+
+```bash
+# 1. Edit files only, so you can review the diff first:
+python scripts/release.py 0.2.0
+
+# 2. Review the diff and tidy the CHANGELOG entry, then commit + tag + push:
+git commit -am "release: v0.2.0"
+git tag v0.2.0
+git push origin main --tags
+```
+
+Or do it all in one step:
+
+```bash
+python scripts/release.py 0.2.0 --commit --push
+```
+
+The `publish.yml` workflow then runs tests, builds the sdist + wheel, checks the
+metadata, and uploads to PyPI automatically.
+
+### Manual alternative
+
+If you prefer to edit by hand, bump the version in **two** places
+(`pyproject.toml` → `version`, `memory_reuse/__init__.py` → `__version__`),
+move `[Unreleased]` items into a dated section in `CHANGELOG.md`, then commit,
+tag, and push as above.
 
 ## Manual build (for local testing)
 
