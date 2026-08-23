@@ -87,3 +87,4 @@ nav:
       - Vector index: api/vector.md
       - Integrations: api/integrations.md
   - Changelog: changelog.md
+  - Vision & design: vision.md

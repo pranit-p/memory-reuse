@@ -17,29 +17,53 @@ An execution cache layer for AI agents that cuts LLM and tool call costs by avoi
 
 ## How it works
 
-When your agent calls an LLM or a tool, `memory-reuse` hashes the inputs and
-checks the cache first. On a hit it returns the stored result instantly — no
-tokens spent, no API call made. On a miss it runs the real call and stores the
-result for next time.
+When your agent calls an LLM or a tool, `memory-reuse` checks the cache first.
+On a hit it returns the stored result instantly — no tokens spent, no API call
+made. On a miss it runs the real call and stores the result for next time:
 
-```mermaid
-flowchart TD
-    Q[LLM / tool call] --> EX{Exact hash<br/>match?}
-    EX -->|hit| HIT[Return cached result<br/>0 tokens, ~ms]
-    EX -->|miss| SEM{Semantic cache<br/>enabled?}
-    SEM -->|no| RUN[Run real LLM / tool]
-    SEM -->|yes| VEC{Similar past<br/>query found?}
-    VEC -->|hit| HIT
-    VEC -->|miss| RUN
-    RUN --> STORE[Store result] --> HIT
+```
+request ──► cache lookup
+              ├── HIT  ──► return stored result   (0 tokens, ~ms)
+              └── MISS ──► run LLM / tool ──► store ──► return
 ```
 
-> **Exact vs semantic:** by default `memory-reuse` does exact-match caching —
-> identical inputs hit the cache. Enabling the optional
-> [semantic cache](#semantic-cache) also serves cached results for
-> *similar-but-not-identical* inputs (reworded questions) using embedding
-> similarity. See the [Architecture guide](https://pranit-p.github.io/memory-reuse/architecture/)
+The lookup always tries the fastest, cheapest path first. An **exact** hash
+match is attempted before anything else; only on an exact miss — and only if the
+semantic cache is enabled — is the query embedded and matched by similarity. So
+identical repeats never pay for an embedding.
+
+### The three cache types
+
+memory-reuse supports three kinds of lookup. Use one, or combine them.
+
+| Type | How it works | Best for |
+|---|---|---|
+| **Exact cache** | Hashes the input and looks for an identical match. | Repeated identical LLM prompts. |
+| **Tool cache** | Hashes a tool name + its arguments, with a TTL, and looks for an identical match. | API calls, DB queries, search — anything with expiry. |
+| **Semantic cache** | Embeds the input and finds the closest previous request by cosine similarity. | Same intent phrased differently ("reworded" questions). |
+
+```
+Exact:     "What is order 123 status?"  ==  "What is order 123 status?"
+           same string  →  instant hash match
+
+Tool:      fetch_order(order_id="123")  called 5 min ago
+           same function + args  →  cached result returned (until TTL expires)
+
+Semantic:  "What is order 123 status?"  ≈  "Where is my order 123?"
+           different words, same intent  →  embedding-similarity match
+```
+
+> **Exact/tool are on by default; semantic is opt-in.** Enabling the
+> [semantic cache](#semantic-cache) is what lets reworded-but-equivalent
+> requests reuse a stored answer. See the
+> [Architecture guide](https://pranit-p.github.io/memory-reuse/architecture/)
 > for the full component and data-flow diagrams.
+
+> **Note on future levels.** The idea behind memory-reuse also covers
+> *node-level* and *graph-level* caching (skipping whole LangGraph nodes or an
+> entire agent run). Those are on the [roadmap](#roadmap) (Phase 3) and are not
+> part of this release — today's building blocks are the three cache types
+> above.
 
 ---
 
