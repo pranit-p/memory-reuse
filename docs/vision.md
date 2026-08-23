@@ -663,26 +663,45 @@ all       = ["agent-memory-sdk[redis,semantic,postgres,qdrant,agentcore]"]
 
 ## Build Phases
 
-### Phase 1 — Exact Cache (MVP)
-- [ ] Cache LLM calls by exact prompt hash
-- [ ] Cache tool call results by input hash + TTL
-- [ ] In-memory and Redis backends
-- [ ] LangGraph decorator integration (`cached_node`, `cached_tool`)
-- [ ] Cache hit / miss metrics
+### Phase 1 — Exact Cache (MVP) ✅ Shipped (v0.1)
+- [x] Cache LLM calls by exact prompt hash
+- [x] Cache tool call results by input hash + TTL
+- [x] In-memory and Redis backends
+- [x] LangGraph decorator integration (`cached_node`, `cached_tool`)
+- [x] Cache hit / miss metrics
 
-### Phase 2 — Semantic Cache
-- [ ] Embedding-based similarity matching
-- [ ] Intent canonicalization before embedding (improves hit rate over raw cosine)
-- [ ] Configurable similarity threshold per cache entry
-- [ ] Multiple embedding providers (OpenAI, Bedrock, local)
+### Phase 2 — Semantic Cache ✅ Shipped (v0.2)
+- [x] Embedding-based similarity matching
+- [x] Configurable similarity threshold (config, env var, and per-call override)
+- [x] Multiple embedding providers (OpenAI, LiteLLM/Bedrock, local)
+- [x] Answer extraction — return only the best-matching sentence(s) (`extract_answer`)
+- [ ] Intent canonicalization before embedding — *deferred*: ship raw cosine
+  first, measure real hit rates, add canonicalization only if the data justifies it.
 
-### Phase 3 — Graph-Level Cache + Partial Reuse
+### Backend roadmap (implement on demand) 🔜
+Storage is abstracted behind `AbstractBackend` (key-value: exact + tool caches)
+and `VectorIndex` (nearest-neighbour: semantic cache), so new backends slot in
+without touching the caches. Shipped today: **in-memory** and **Redis** (both
+key-value and vector). The following are planned and will be built when a real
+need appears — each has a specific trigger:
+
+- [ ] **SQLite** — file-based persistence with no server. *Trigger:* single-machine
+  apps that want the cache to survive restarts without running Redis. (Lowest
+  effort, fully testable — the likely next backend.)
+- [ ] **PostgreSQL + pgvector** — one datastore for both key-value and indexed
+  vector search. *Trigger:* teams already running Postgres.
+- [ ] **Qdrant** — dedicated vector database for large-scale KNN. *Trigger:*
+  millions of embeddings where vector search is the bottleneck.
+- [ ] **AWS AgentCore Memory** — managed, cross-microVM backend. *Trigger:*
+  deploying on Amazon Bedrock AgentCore (see Phase 4).
+
+### Phase 3 — Graph-Level Cache + Partial Reuse 🔜 Planned
 - [ ] Graph-level execution cache (`cache.wrap_graph`)
 - [ ] Node-level output cache
 - [ ] Detect which nodes can be skipped on similar requests
 - [ ] Node-level cache invalidation
 
-### Phase 4 — Analytics + Integrations
+### Phase 4 — Analytics + Integrations 🔜 Planned
 - [ ] Real-time dashboard: hit rate, tokens saved, cost saved, latency saved
 - [ ] Prometheus + OpenTelemetry export
 - [ ] Strands Agents integration
