@@ -5,10 +5,15 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from memory_reuse._utils import build_cache_key, deserialize_value, serialize_value
+from memory_reuse._utils import (
+    build_cache_key,
+    check_scope,
+    deserialize_value,
+    serialize_value,
+)
 from memory_reuse.backends.base import AbstractBackend
 from memory_reuse.config import CacheConfig
-from memory_reuse.exceptions import InvalidTTLError, ScopeViolationError
+from memory_reuse.exceptions import InvalidTTLError
 from memory_reuse.stats import StatsTracker
 
 logger = logging.getLogger(__name__)
@@ -156,6 +161,10 @@ class ToolCache:
     def _check_scope(self, scope: str, scope_id: str | None) -> None:
         """Guard against missing scope IDs.
 
+        Delegates to the shared :func:`memory_reuse._utils.check_scope` guard so
+        that :exc:`~memory_reuse.exceptions.ScopeViolationError` behaviour is
+        identical across every cache layer.
+
         Args:
             scope: Requested scope.
             scope_id: Provided identifier.
@@ -164,7 +173,4 @@ class ToolCache:
             ScopeViolationError: When ``scope`` is non-global and ``scope_id``
                 is absent.
         """
-        if scope in ("user", "session") and not scope_id:
-            raise ScopeViolationError(
-                f"scope='{scope}' requires a non-empty scope_id, but none was provided."
-            )
+        check_scope(scope, scope_id)

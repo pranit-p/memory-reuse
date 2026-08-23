@@ -110,6 +110,8 @@ async def cached_litellm_completion(
     scope: _SCOPE_TYPE = "global",
     user_id: str | None = None,
     session_id: str | None = None,
+    semantic: bool = False,
+    exact_only: bool = False,
     **litellm_kwargs: Any,
 ) -> Any:
     """Cached wrapper around ``litellm.acompletion``.
@@ -134,6 +136,15 @@ async def cached_litellm_completion(
             value set via :meth:`~memory_reuse.core.MemoryCache.set_context`.
         session_id: Session identifier for ``scope="session"``.  Falls back
             to context.
+        semantic: When ``True``, route through the combined exact-then-semantic
+            flow (:meth:`~memory_reuse.core.MemoryCache.lookup` /
+            :meth:`~memory_reuse.core.MemoryCache.store`) so a reworded but
+            equivalent prompt can hit the cache.  The semantic query text is
+            derived from the concatenated message contents.  Requires
+            ``semantic_enabled=True`` on the cache config to have any effect;
+            otherwise behaviour is identical to Phase 1.
+        exact_only: When ``True``, force Phase 1 exact-only behaviour for this
+            call site even when the cache has semantic matching enabled.
         **litellm_kwargs: Additional keyword arguments forwarded to
             ``litellm.acompletion`` (e.g. ``temperature``, ``max_tokens``,
             ``stream=False``).
@@ -167,7 +178,20 @@ async def cached_litellm_completion(
     # values produce different cached answers.
     key_parts = ["litellm.completion", model, messages, litellm_kwargs]
 
-    cached_response = await cache.exact.get(key_parts, scope=scope, scope_id=scope_id)
+    if semantic:
+        # The semantic query text is the concatenated message contents so a
+        # reworded prompt with the same intent can match a stored answer.
+        query_text = " ".join(str(m.get("content", "")) for m in messages)
+        cached_response = await cache.lookup(
+            key_parts,
+            query_text,
+            scope=scope,
+            scope_id=scope_id,
+            exact_only=exact_only,
+        )
+    else:
+        query_text = ""
+        cached_response = await cache.exact.get(key_parts, scope=scope, scope_id=scope_id)
     if cached_response is not None:
         logger.debug("cached_litellm_completion: HIT model=%s scope=%s", model, scope)
         return cached_response
@@ -190,7 +214,18 @@ async def cached_litellm_completion(
     # because ModelResponse is not always directly JSON-serialisable.
     serialisable = response.model_dump() if hasattr(response, "model_dump") else dict(response)
 
-    await cache.exact.set(key_parts, serialisable, scope=scope, scope_id=scope_id, ttl=ttl)
+    if semantic:
+        await cache.store(
+            key_parts,
+            query_text,
+            serialisable,
+            scope=scope,
+            scope_id=scope_id,
+            ttl=ttl,
+            exact_only=exact_only,
+        )
+    else:
+        await cache.exact.set(key_parts, serialisable, scope=scope, scope_id=scope_id, ttl=ttl)
     logger.debug("cached_litellm_completion: stored response in cache")
 
     # Return the original rich response object on first call.

@@ -55,6 +55,8 @@ def cached_node(
     scope: _SCOPE_TYPE = "global",
     ttl: int | None = None,
     key_fields: list[str] | None = None,
+    semantic: bool = False,
+    exact_only: bool = False,
 ) -> Callable:
     """Decorator for LangGraph nodes — caches the full node output.
 
@@ -71,6 +73,16 @@ def cached_node(
         key_fields: If provided, only these fields from the input state are
             included when computing the cache key.  Useful to ignore
             ephemeral state fields.
+        semantic: When ``True``, route through the combined exact-then-semantic
+            flow (:meth:`~memory_reuse.core.MemoryCache.lookup` /
+            :meth:`~memory_reuse.core.MemoryCache.store`) so a reworded but
+            equivalent state can hit the cache.  The semantic query text is
+            derived from the ``key_fields`` subset (or full state) rendered to a
+            string.  Requires ``semantic_enabled=True`` on the cache config to
+            have any effect; otherwise behaviour is identical to Phase 1.
+        exact_only: When ``True``, force Phase 1 exact-only behaviour for this
+            call site even when the cache has semantic matching enabled.  Useful
+            for nodes whose correctness depends on exact input.
 
     Returns:
         The decorator function.
@@ -112,7 +124,18 @@ def cached_node(
 
             key_parts = [func.__qualname__, key_data]
 
-            cached = await cache.exact.get(key_parts, scope=scope, scope_id=scope_id)
+            if semantic:
+                query_text = str(key_data)
+                cached = await cache.lookup(
+                    key_parts,
+                    query_text,
+                    scope=scope,
+                    scope_id=scope_id,
+                    exact_only=exact_only,
+                )
+            else:
+                query_text = ""
+                cached = await cache.exact.get(key_parts, scope=scope, scope_id=scope_id)
             if cached is not None:
                 logger.debug("cached_node: HIT func=%s scope=%s", func.__qualname__, scope)
                 return cached
@@ -125,7 +148,18 @@ def cached_node(
                     None, functools.partial(func, *args, **kwargs)
                 )
 
-            await cache.exact.set(key_parts, result, scope=scope, scope_id=scope_id, ttl=ttl)
+            if semantic:
+                await cache.store(
+                    key_parts,
+                    query_text,
+                    result,
+                    scope=scope,
+                    scope_id=scope_id,
+                    ttl=ttl,
+                    exact_only=exact_only,
+                )
+            else:
+                await cache.exact.set(key_parts, result, scope=scope, scope_id=scope_id, ttl=ttl)
             return result
 
         # For sync functions we still return the async_wrapper so that callers
@@ -142,6 +176,8 @@ def cached_tool(
     *,
     scope: _SCOPE_TYPE = "global",
     ttl: int = 300,
+    semantic: bool = False,
+    exact_only: bool = False,
 ) -> Callable:
     """Decorator for tool/function calls — caches the return value.
 
@@ -152,6 +188,16 @@ def cached_tool(
         cache: The :class:`~memory_reuse.core.MemoryCache` instance to use.
         scope: Cache scope.
         ttl: Time-to-live in seconds.  Defaults to 300 (5 minutes).
+        semantic: When ``True``, route through the combined exact-then-semantic
+            flow (:meth:`~memory_reuse.core.MemoryCache.lookup` /
+            :meth:`~memory_reuse.core.MemoryCache.store`) so a reworded but
+            equivalent call can hit the cache.  The semantic query text is
+            derived from the string form of the bound arguments.  Requires
+            ``semantic_enabled=True`` on the cache config to have any effect;
+            otherwise behaviour is identical to Phase 1.
+        exact_only: When ``True``, force Phase 1 exact-only behaviour for this
+            call site even when the cache has semantic matching enabled.  Useful
+            for tools with side effects or destructive operations.
 
     Returns:
         The decorator function.
@@ -192,7 +238,21 @@ def cached_tool(
 
             tool_name = func.__qualname__
 
-            cached = await cache.tool.get(tool_name, args_dict, scope=scope, scope_id=scope_id)
+            if semantic:
+                # The exact-cache key mirrors ToolCache's ``[tool_name, args]``
+                # shape so exact hits behave identically to the non-semantic
+                # path, while the query text is derived from the bound args.
+                key_parts = [tool_name, args_dict]
+                query_text = str(args_dict)
+                cached = await cache.lookup(
+                    key_parts,
+                    query_text,
+                    scope=scope,
+                    scope_id=scope_id,
+                    exact_only=exact_only,
+                )
+            else:
+                cached = await cache.tool.get(tool_name, args_dict, scope=scope, scope_id=scope_id)
             if cached is not None:
                 logger.debug("cached_tool: HIT func=%s scope=%s", tool_name, scope)
                 return cached
@@ -205,9 +265,20 @@ def cached_tool(
                     None, functools.partial(func, *args, **kwargs)
                 )
 
-            await cache.tool.set(
-                tool_name, args_dict, result, scope=scope, scope_id=scope_id, ttl=ttl
-            )
+            if semantic:
+                await cache.store(
+                    [tool_name, args_dict],
+                    str(args_dict),
+                    result,
+                    scope=scope,
+                    scope_id=scope_id,
+                    ttl=ttl,
+                    exact_only=exact_only,
+                )
+            else:
+                await cache.tool.set(
+                    tool_name, args_dict, result, scope=scope, scope_id=scope_id, ttl=ttl
+                )
             return result
 
         # Always return the async wrapper so the decorator works correctly in

@@ -1,6 +1,6 @@
 [project]
 name = "memory-reuse"
-version = "0.1.0"
+version = "0.2.0"
 description = "Execution cache layer for AI agents — cut LLM and tool call costs by reusing previous results."
 readme = "README.md"
 license = "MIT"
@@ -37,7 +37,7 @@ dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/pranit-p/memory-reuse"
-Documentation = "https://github.com/pranit-p/memory-reuse#readme"
+Documentation = "https://pranit-p.github.io/memory-reuse/"
 Repository = "https://github.com/pranit-p/memory-reuse"
 Issues = "https://github.com/pranit-p/memory-reuse/issues"
 Changelog = "https://github.com/pranit-p/memory-reuse/blob/main/CHANGELOG.md"
@@ -45,15 +45,31 @@ Changelog = "https://github.com/pranit-p/memory-reuse/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 redis = ["redis>=5.0.0"]
 litellm = ["litellm>=1.40.0"]
+# Semantic cache with API-based embeddings (OpenAI + LiteLLM). No torch — the
+# openai and litellm clients are small, and numpy is only a cosine-similarity
+# speedup (there is a pure-Python fallback). One flag covers both API providers.
+semantic = ["numpy>=1.26", "openai>=1.0", "litellm>=1.40.0"]
+# Local embeddings via sentence-transformers. This pulls in PyTorch, which is
+# large. On a CPU-only machine install the CPU torch wheel FIRST to avoid the
+# ~2GB GPU/CUDA download:
+#     pip install torch --index-url https://download.pytorch.org/whl/cpu
+#     pip install "memory-reuse[semantic-local]"
+semantic-local = ["memory-reuse[semantic]", "sentence-transformers>=3.0"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
+    "hypothesis>=6.0",
     "black>=24.0",
     "ruff>=0.4",
     "mypy>=1.10",
 ]
-all = ["memory-reuse[redis,litellm]"]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.25",
+]
+all = ["memory-reuse[redis,litellm,semantic-local]"]
 
 [build-system]
 requires = ["hatchling"]
@@ -103,7 +119,7 @@ line-length = 100
 target-version = ["py310", "py311", "py312"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 warn_unused_configs = true
 disallow_untyped_defs = true
 ignore_missing_imports = true

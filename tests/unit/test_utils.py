@@ -6,10 +6,12 @@ import pytest
 
 from memory_reuse._utils import (
     build_cache_key,
+    cosine_similarity,
     deserialize_value,
     hash_value,
     sanitize_key,
     serialize_value,
+    split_sentences,
 )
 
 
@@ -107,3 +109,60 @@ class TestSerializeDeserialize:
     def test_invalid_bytes_raises(self) -> None:
         with pytest.raises(ValueError):
             deserialize_value(b"not compressed data")
+
+
+class TestCosineSimilarity:
+    def test_identical_vectors_return_one(self) -> None:
+        v = [1.0, 2.0, 3.0]
+        assert cosine_similarity(v, list(v)) == pytest.approx(1.0)
+
+    def test_opposite_vectors_return_zero(self) -> None:
+        assert cosine_similarity([1.0, 0.0], [-1.0, 0.0]) == pytest.approx(0.0)
+
+    def test_orthogonal_vectors_return_half(self) -> None:
+        assert cosine_similarity([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.5)
+
+    def test_result_within_unit_range(self) -> None:
+        score = cosine_similarity([3.0, -1.0, 2.0], [1.0, 4.0, -2.0])
+        assert 0.0 <= score <= 1.0
+
+    def test_scaled_vectors_are_identical(self) -> None:
+        # Cosine ignores magnitude; a scaled copy is maximally similar.
+        assert cosine_similarity([1.0, 2.0, 3.0], [2.0, 4.0, 6.0]) == pytest.approx(1.0)
+
+    def test_dimension_mismatch_raises(self) -> None:
+        with pytest.raises(ValueError, match="dimension mismatch"):
+            cosine_similarity([1.0, 2.0], [1.0, 2.0, 3.0])
+
+    def test_zero_vector_returns_neutral(self) -> None:
+        assert cosine_similarity([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]) == pytest.approx(0.5)
+
+    def test_both_zero_vectors_return_neutral(self) -> None:
+        assert cosine_similarity([0.0, 0.0], [0.0, 0.0]) == pytest.approx(0.5)
+
+    def test_empty_vectors_return_neutral(self) -> None:
+        assert cosine_similarity([], []) == pytest.approx(0.5)
+
+
+class TestSplitSentences:
+    def test_empty_string_returns_empty(self) -> None:
+        assert split_sentences("") == []
+
+    def test_whitespace_only_returns_empty(self) -> None:
+        assert split_sentences("   \n  ") == []
+
+    def test_single_sentence_no_boundary(self) -> None:
+        assert split_sentences("just one sentence") == ["just one sentence"]
+
+    def test_splits_on_period(self) -> None:
+        assert split_sentences("First. Second.") == ["First.", "Second."]
+
+    def test_splits_on_question_and_exclamation(self) -> None:
+        assert split_sentences("Really? Yes! Ok.") == ["Really?", "Yes!", "Ok."]
+
+    def test_splits_on_newlines(self) -> None:
+        # Bulleted/line-separated answers split per line even without a period.
+        assert split_sentences("- one\n- two\n- three") == ["- one", "- two", "- three"]
+
+    def test_strips_and_drops_empty_fragments(self) -> None:
+        assert split_sentences("A.   \n\n  B.") == ["A.", "B."]

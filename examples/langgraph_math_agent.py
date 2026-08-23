@@ -80,8 +80,43 @@ if os.environ.get("API_KEY") and not os.environ.get("GROQ_API_KEY"):
     os.environ["GROQ_API_KEY"] = os.environ["API_KEY"]
 
 # One cache instance shared by the whole agent.
-# In-memory backend keeps this example dependency-free; swap to Redis in prod.
-cache = MemoryCache(CacheConfig(backend="memory", default_ttl=3600))
+#
+# Pick ONE of the two backends below.
+#
+# ── Option A: In-memory (default, zero setup) ─────────────────────────────
+# Cache lives inside this Python process only. Great for local dev, quick
+# tests, and single-process scripts. Everything is lost when the process
+# exits, and it is NOT shared across processes/servers.
+#
+#     cache = MemoryCache(
+#         CacheConfig(backend="memory", default_ttl=3600)
+#     )
+#
+# ── Option B: Redis (shared, persistent) ──────────────────────────────────
+# Cache lives in Redis, so it is shared across every process, worker, and
+# server that connects to the same instance — and it survives restarts.
+# Use this in production, or whenever more than one process needs the cache
+# (e.g. multiple web workers, or an agent running on AgentCore microVMs).
+#
+# Start Redis locally first, for example:
+#     docker run -d --name redis -p 6379:6379 redis/redis-stack:latest
+#
+# Requires the redis extra:  pip install "memory-reuse[redis]"
+cache = MemoryCache(
+    CacheConfig(
+        backend="redis",
+        redis_url="redis://localhost:6379/0",
+        default_ttl=3600,
+    )
+)
+
+# ── Option C: configure from environment variables ───────────────────────
+# Instead of hardcoding, read the backend from MEMORY_REUSE_* env vars so you
+# can switch between memory and redis without editing code:
+#     export MEMORY_REUSE_BACKEND=redis
+#     export MEMORY_REUSE_REDIS_URL=redis://localhost:6379/0
+#
+#     cache = MemoryCache.from_env()
 
 
 # --------------------------------------------------------------------------
@@ -406,11 +441,6 @@ async def main() -> None:
     logger.info("\n=== First run (cold cache — real LLM + real tool calls) ===")
     for q in questions:
         await ask(agent, q)
-
-    questions = [
-        "What is 256 multiplied by 1?",
-        "what is python prgramming language.",
-    ]
 
     logger.info("\n=== Second run (warm cache — everything reused, 0 cost) ===")
     for q in questions:

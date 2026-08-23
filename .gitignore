@@ -33,6 +33,13 @@ coverage.xml
 # ruff
 .ruff_cache/
 
+# hypothesis (property-based testing)
+.hypothesis/
+
+# Test / PBT output artifacts
+pbt_out.txt
+.pbt_out.txt
+
 # IDEs
 .idea/
 .vscode/
@@ -49,3 +56,13 @@ coverage.xml
 
 # Logs
 *.log
+
+# Kiro
+.kiro/
+
+# MkDocs build output
+site/
+
+# Local developer helper scripts / scratch output
+run_gate.sh
+*.out

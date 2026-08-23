@@ -1,0 +1,62 @@
+name: Deploy docs
+
+# Builds the MkDocs site and deploys it to GitHub Pages.
+#
+# Triggers on version tags (vX.Y.Z) so the published docs track releases, and
+# can also be run manually from the Actions tab.
+#
+# One-time repo setup:
+#   Settings → Pages → Build and deployment → Source: "GitHub Actions".
+
+on:
+  push:
+    tags:
+      - "v*" # e.g. v0.2.0
+  workflow_dispatch: {} # allows manual trigger from the Actions tab
+
+# Allow only one concurrent deployment; don't cancel an in-progress run.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install docs dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # The package itself is installed so mkdocstrings can import it to
+          # generate the API reference from docstrings.
+          pip install -e ".[docs]"
+
+      - name: Build site (strict — fail on broken refs)
+        run: mkdocs build --strict
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write # deploy to Pages
+      id-token: write # OIDC token for the Pages deployment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
