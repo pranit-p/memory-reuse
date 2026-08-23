@@ -22,17 +22,24 @@ checks the cache first. On a hit it returns the stored result instantly — no
 tokens spent, no API call made. On a miss it runs the real call and stores the
 result for next time.
 
-```
-request ──► hash inputs ──► cache lookup
-                              ├── HIT  ──► return cached result (0 cost)
-                              └── MISS ──► run LLM/tool ──► store ──► return
+```mermaid
+flowchart TD
+    Q[LLM / tool call] --> EX{Exact hash<br/>match?}
+    EX -->|hit| HIT[Return cached result<br/>0 tokens, ~ms]
+    EX -->|miss| SEM{Semantic cache<br/>enabled?}
+    SEM -->|no| RUN[Run real LLM / tool]
+    SEM -->|yes| VEC{Similar past<br/>query found?}
+    VEC -->|hit| HIT
+    VEC -->|miss| RUN
+    RUN --> STORE[Store result] --> HIT
 ```
 
 > **Exact vs semantic:** by default `memory-reuse` does exact-match caching —
 > identical inputs hit the cache. Enabling the optional
 > [semantic cache](#semantic-cache) also serves cached results for
 > *similar-but-not-identical* inputs (reworded questions) using embedding
-> similarity.
+> similarity. See the [Architecture guide](https://pranit-p.github.io/memory-reuse/architecture/)
+> for the full component and data-flow diagrams.
 
 ---
 

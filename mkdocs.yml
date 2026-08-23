@@ -39,7 +39,11 @@ theme:
 markdown_extensions:
   - admonition
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.highlight:
@@ -65,6 +69,7 @@ plugins:
 
 nav:
   - Home: index.md
+  - Architecture: architecture.md
   - Getting started:
       - Install: install.md
       - Quick start: quickstart.md
