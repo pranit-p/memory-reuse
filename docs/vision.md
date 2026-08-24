@@ -22,16 +22,9 @@
     - SQLite / Postgres / Qdrant backends and an AWS AgentCore backend
     - Cost analytics dashboard and Prometheus / OpenTelemetry export
 
-    !!! note "Naming"
-        This document predates the final package name. It refers to the project
-        as *"Agent Memory SDK"* / `agent-memory-sdk` / `agent_memory` and uses
-        `AGENT_MEMORY_*` environment variables. The shipped package is
-        **`memory-reuse`** / `memory_reuse`, with `MEMORY_REUSE_*` variables.
-        Treat the old names as historical.
-
 ---
 
-# Agent Memory SDK
+# memory-reuse
 ### A Framework-Agnostic Python Package to Reduce AI Agent Costs
 
 ---
@@ -259,13 +252,13 @@ Works with any Python agent framework. No lock-in.
 
 ```python
 # LangGraph
-from agent_memory.integrations.langgraph import cached_node, cached_tool
+from memory_reuse.integrations.langgraph import cached_node, cached_tool
 
 @cached_node(cache, ttl=600)
 def my_langgraph_node(state: AgentState) -> AgentState: ...
 
 # Strands
-from agent_memory.integrations.strands import cached_tool
+from memory_reuse.integrations.strands import cached_tool
 
 @cached_tool(cache, ttl=300)
 def my_strands_tool(input: dict) -> dict: ...
@@ -515,10 +508,10 @@ AgentCore Runtime (microVMs)
 
 ```python
 from amazon_bedrock_agentcore import BedrockAgentCoreApp
-from agent_memory import MemoryCache
+from memory_reuse import MemoryCache
 
 app   = BedrockAgentCoreApp()
-cache = MemoryCache.from_env()   # reads AGENT_MEMORY_* env vars
+cache = MemoryCache.from_env()   # reads MEMORY_REUSE_* env vars
 
 @app.entrypoint
 def handler(input: dict, context) -> dict:
@@ -533,21 +526,28 @@ def handler(input: dict, context) -> dict:
 
 ## Storage Backend Options
 
-| Backend | Exact Cache | Semantic Cache | Latency | Cost | Best For |
-|---|---|---|---|---|---|
-| In-Memory | ✅ | ❌ | <0.1ms | Free | Dev / testing only |
-| SQLite | ✅ | ❌ | ~1ms | Free | Single machine |
-| Redis Stack | ✅ | ✅ | <1ms | ~$25/mo (t4g.small) | Teams already on Redis |
-| Upstash Redis | ✅ | ✅ | <5ms | $0.20/100K ops | Small teams, low traffic |
-| PostgreSQL + pgvector | ✅ | ✅ | 5–15ms | ~$0 if existing | Teams already on Postgres |
-| Redis + Qdrant | ✅ | ✅ | <1ms | ~$30–50/mo | High scale |
-| ElastiCache + OpenSearch | ✅ | ✅ | <1ms | ~$90/mo | AgentCore / AWS production |
+The **Status** column reflects what ships in v0.2.0 vs what is planned (see the
+[Backend roadmap](#backend-roadmap-implement-on-demand) above).
+
+| Backend | Exact Cache | Semantic Cache | Latency | Cost | Best For | Status |
+|---|---|---|---|---|---|---|
+| In-Memory | ✅ | ✅ | <0.1ms | Free | Dev / testing only | ✅ Shipped |
+| Redis Stack | ✅ | ✅ | <1ms | ~$25/mo (t4g.small) | Teams already on Redis | ✅ Shipped |
+| Upstash Redis | ✅ | ✅ | <5ms | $0.20/100K ops | Small teams, low traffic | ✅ Shipped (Redis-compatible) |
+| SQLite | ✅ | ⚠️ brute-force | ~1ms | Free | Single-machine persistence, no server | 🔜 Planned |
+| PostgreSQL + pgvector | ✅ | ✅ | 5–15ms | ~$0 if existing | Teams already on Postgres | 🔜 Planned |
+| Redis + Qdrant | ✅ | ✅ | <1ms | ~$30–50/mo | High-scale vector search | 🔜 Planned |
+| AWS AgentCore Memory | ✅ | ✅ | ~100–300ms | managed | Cross-microVM shared cache on AWS | 🔜 Planned |
+| ElastiCache + OpenSearch | ✅ | ✅ | <1ms | ~$90/mo | AgentCore / AWS production | 🔜 Planned |
 
 **Decision rule:**
-- Starting out → Upstash Redis (free tier, zero infra)
-- Small team on AWS → Upstash + AgentCore Memory
-- Large team on AWS → ElastiCache + AgentCore Memory + OpenSearch
-- Self-hosted → Redis Stack or Redis + Qdrant
+- Getting started / dev → In-Memory (shipped, zero setup)
+- Production, shared across processes → Redis Stack or Upstash Redis (shipped)
+- Single machine, want persistence without a server → SQLite (planned)
+- Already on Postgres → PostgreSQL + pgvector (planned)
+- Deploying on AWS Bedrock AgentCore → AgentCore Memory, optionally with
+  ElastiCache as a hot layer (planned)
+- Very large vector scale → Redis + Qdrant (planned)
 
 ---
 
@@ -589,20 +589,27 @@ With SDK + Upstash + AgentCore Memory (Option D — Recommended):
 
 ### Install
 
+!!! note "Aspirational extras"
+    Some extras below (`agentcore`) and the `all` set are **planned**, not yet
+    shipped — see the [Backend roadmap](#backend-roadmap-implement-on-demand).
+    For current install instructions and the extras that exist today, see
+    [Install](install.md).
+
 ```bash
-pip install agent-memory-sdk                  # minimal, in-memory only
-pip install agent-memory-sdk[redis]           # + Redis backend
-pip install agent-memory-sdk[semantic]        # + semantic cache
-pip install agent-memory-sdk[agentcore]       # + AWS AgentCore backend
-pip install agent-memory-sdk[all]             # everything
+pip install memory-reuse                  # minimal, in-memory only
+pip install memory-reuse[redis]           # + Redis backend
+pip install memory-reuse[semantic]        # + semantic cache (API embeddings)
+pip install memory-reuse[semantic-local]  # + local embeddings (sentence-transformers)
+pip install memory-reuse[agentcore]       # + AWS AgentCore backend (planned)
+pip install memory-reuse[all]             # everything
 ```
 
 ### Package Structure
 
 ```
-agent-memory-sdk/
+memory-reuse/
 │
-├── agent_memory/
+├── memory_reuse/
 │   ├── __init__.py                  ← MemoryCache, CacheConfig (public API)
 │   │
 │   ├── cache/
@@ -644,7 +651,7 @@ agent-memory-sdk/
 
 ```toml
 [project]
-name = "agent-memory-sdk"
+name = "memory-reuse"
 version = "0.1.0"
 description = "Execution cache layer for AI agents — reduce LLM and tool call costs"
 requires-python = ">=3.10"
@@ -656,7 +663,7 @@ semantic  = ["sentence-transformers>=3.0.0", "numpy>=1.26.0"]
 postgres  = ["psycopg2-binary>=2.9.0", "pgvector>=0.2.0"]
 qdrant    = ["qdrant-client>=1.9.0"]
 agentcore = ["amazon-bedrock-agentcore>=1.0.0", "boto3>=1.34.0"]
-all       = ["agent-memory-sdk[redis,semantic,postgres,qdrant,agentcore]"]
+all       = ["memory-reuse[redis,semantic,postgres,qdrant,agentcore]"]
 ```
 
 ---
@@ -757,7 +764,7 @@ Every request pays.                      Most requests are free.
 
 ---
 
-## End-to-End Example — Confluence Agent with AgentCore Runtime + AgentCore Memory + Agent Memory SDK
+## End-to-End Example — Confluence Agent with AgentCore Runtime + AgentCore Memory + memory-reuse
 
 This is the complete picture of how all three work together in a real production agent.
 
@@ -835,10 +842,10 @@ confluence-agent/
 
 ```python
 # tools.py
-from agent_memory import MemoryCache
-from agent_memory.integrations.langgraph import cached_tool
+from memory_reuse import MemoryCache
+from memory_reuse.integrations.langgraph import cached_tool
 
-# Backend = agentcore (reads AGENT_MEMORY_* env vars)
+# Backend = agentcore (reads MEMORY_REUSE_* env vars)
 # No Redis needed — AgentCore Memory is the shared external cache
 cache = MemoryCache.from_env()
 
@@ -880,7 +887,7 @@ def get_user_space_permissions(user_id: str) -> list[str]:
 ```python
 # nodes.py
 from typing import TypedDict
-from agent_memory.integrations.langgraph import cached_node
+from memory_reuse.integrations.langgraph import cached_node
 from tools import search_confluence, fetch_page_content
 
 class ConfluenceAgentState(TypedDict):
@@ -956,7 +963,7 @@ def format_response(state: ConfluenceAgentState) -> ConfluenceAgentState:
 ```python
 # graph.py
 from langgraph.graph import StateGraph, END
-from agent_memory import MemoryCache
+from memory_reuse import MemoryCache
 from nodes import (
     ConfluenceAgentState,
     understand_request,
@@ -1069,7 +1076,7 @@ def store_conversation_event(user_id: str, session_id: str,
 ```python
 # agent.py
 from amazon_bedrock_agentcore import BedrockAgentCoreApp
-from agent_memory import MemoryCache
+from memory_reuse import MemoryCache
 from graph import build_graph
 from memory import get_user_context, store_conversation_event
 
@@ -1172,13 +1179,13 @@ runtime:
   entrypoint: agent.handler
 
 environment:
-  # Agent Memory SDK — using AgentCore Memory as backend (no Redis required)
-  AGENT_MEMORY_BACKEND:              agentcore
-  AGENT_MEMORY_AGENTCORE_MEMORY_ID:  mem-confluence-agent-prod
-  AGENT_MEMORY_SEMANTIC_ENABLED:     "true"
-  AGENT_MEMORY_EMBEDDING_PROVIDER:   bedrock
-  AGENT_MEMORY_EMBEDDING_MODEL:      amazon.titan-embed-text-v2
-  AGENT_MEMORY_SIMILARITY_THRESHOLD: "0.90"
+  # memory-reuse — using AgentCore Memory as backend (no Redis required)
+  MEMORY_REUSE_BACKEND:              agentcore
+  MEMORY_REUSE_AGENTCORE_MEMORY_ID:  mem-confluence-agent-prod
+  MEMORY_REUSE_SEMANTIC_ENABLED:     "true"
+  MEMORY_REUSE_EMBEDDING_PROVIDER:   bedrock
+  MEMORY_REUSE_EMBEDDING_MODEL:      amazon.titan-embed-text-v2
+  MEMORY_REUSE_SIMILARITY_THRESHOLD: "0.90"
 
   # Confluence config
   CONFLUENCE_URL:                    https://your-org.atlassian.net
@@ -1203,7 +1210,7 @@ AgentCore Memory: retrieve user context
   → "User is senior dev, prefers CLI, had staging issues last week"
                 │
                 ▼
-Agent Memory SDK: graph-level cache check
+memory-reuse: graph-level cache check
   key = hash("deploy to production" + "senior+CLI+staging-issues" + user_id)
                 │
        ─────────┴──────────
@@ -1292,7 +1299,7 @@ AgentCore Memory
   Impact:  Personalised answers — junior devs get step-by-step,
            senior devs get concise CLI commands
 
-Agent Memory SDK (our package)
+memory-reuse (our package)
   Role:    Stops the agent from doing the same work twice
   Handles: Tool cache, node cache, graph cache, semantic deduplication
   Impact:  70–80% cost reduction, <50ms response on cache hits
@@ -1333,11 +1340,11 @@ Team size       Backend recommendation
 
 environment:
   # Switch SDK to Redis for hot-path cache
-  AGENT_MEMORY_BACKEND:              redis
-  AGENT_MEMORY_REDIS_URL:            redis://your-elasticache-endpoint:6379
-  AGENT_MEMORY_SEMANTIC_ENABLED:     "true"
-  AGENT_MEMORY_EMBEDDING_PROVIDER:   bedrock
-  AGENT_MEMORY_EMBEDDING_MODEL:      amazon.titan-embed-text-v2
+  MEMORY_REUSE_BACKEND:              redis
+  MEMORY_REUSE_REDIS_URL:            redis://your-elasticache-endpoint:6379
+  MEMORY_REUSE_SEMANTIC_ENABLED:     "true"
+  MEMORY_REUSE_EMBEDDING_PROVIDER:   bedrock
+  MEMORY_REUSE_EMBEDDING_MODEL:      amazon.titan-embed-text-v2
 
   # AgentCore Memory still used for long-term user memory
   # (handled directly via memory.py — unchanged)
