@@ -13,11 +13,12 @@
     - Embedding providers: local (sentence-transformers), OpenAI, LiteLLM
     - Multi-scope isolation (global / user / session)
     - LangGraph (`cached_node`, `cached_tool`) and LiteLLM integrations
+    - Node-level and graph-level caching (`cache.wrap_graph`, node skipping,
+      `invalidate_node`)
 
-    **Planned (see the [roadmap](index.md) — Phase 3+), described below but not
+    **Planned (see the [roadmap](index.md) — Phase 4+), described below but not
     yet available:**
 
-    - Node-level and graph-level caching (`cache.wrap_graph`, node skipping)
     - Strands / CrewAI integrations
     - SQLite / Postgres / Qdrant backends and an AWS AgentCore backend
     - Cost analytics dashboard and Prometheus / OpenTelemetry export
@@ -702,11 +703,11 @@ need appears — each has a specific trigger:
 - [ ] **AWS AgentCore Memory** — managed, cross-microVM backend. *Trigger:*
   deploying on Amazon Bedrock AgentCore (see Phase 4).
 
-### Phase 3 — Graph-Level Cache + Partial Reuse 🔜 Planned
-- [ ] Graph-level execution cache (`cache.wrap_graph`)
-- [ ] Node-level output cache
-- [ ] Detect which nodes can be skipped on similar requests
-- [ ] Node-level cache invalidation
+### Phase 3 — Graph-Level Cache + Partial Reuse ✅ Shipped
+- [x] Graph-level execution cache (`cache.wrap_graph`)
+- [x] Node-level output cache
+- [x] Detect which nodes can be skipped on similar requests
+- [x] Node-level cache invalidation
 
 ### Phase 4 — Analytics + Integrations 🔜 Planned
 - [ ] Real-time dashboard: hit rate, tokens saved, cost saved, latency saved

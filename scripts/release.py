@@ -104,24 +104,19 @@ def update_changelog(new_version: str) -> None:
     # new version. Whatever content was under [Unreleased] now falls under the
     # new version heading — which is exactly what we want at release time.
     new_heading = (
-        "## [Unreleased]\n\n"
-        "_Nothing yet._\n\n"
-        "---\n\n"
-        f"## [{new_version}] — {today}"
+        "## [Unreleased]\n\n" "_Nothing yet._\n\n" "---\n\n" f"## [{new_version}] — {today}"
     )
     text = text.replace("## [Unreleased]", new_heading, 1)
 
     # Refresh link footers if present (best-effort; safe to skip if absent).
     text = re.sub(
         r"(?m)^\[Unreleased\]:.*$",
-        f"[Unreleased]: https://github.com/pranit-p/memory-reuse/compare/"
-        f"v{new_version}...HEAD",
+        f"[Unreleased]: https://github.com/pranit-p/memory-reuse/compare/" f"v{new_version}...HEAD",
         text,
     )
     # Add a link for the new version right after the Unreleased link line.
     version_link = (
-        f"[{new_version}]: https://github.com/pranit-p/memory-reuse/releases/"
-        f"tag/v{new_version}"
+        f"[{new_version}]: https://github.com/pranit-p/memory-reuse/releases/" f"tag/v{new_version}"
     )
     if f"[{new_version}]:" not in text:
         text = re.sub(

@@ -9,8 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet._
+
+---
+
+## [0.3.0] — 2026-08-25
+
+### Added
+- **Phase 3 — graph-level execution cache.** `MemoryCache.wrap_graph(graph, ...)`
+  wraps a compiled LangGraph graph so an entire run can be served from cache:
+  on a hit the stored final result is returned with zero nodes run, and on a
+  miss the real graph runs and its final state is stored. Exposes `invoke` /
+  `ainvoke` with the wrapped graph's signatures plus per-call `bypass_cache`
+  and `no_store` controls. Supports `semantic`, `similarity_threshold`, `ttl`,
+  `scope`, `key_fields`, `exact_only`, and `graph_id`.
+- `CachedGraph` wrapper (in `integrations.langgraph`) implementing the whole-run
+  lookup/store flow over the existing `MemoryCache.lookup` / `store`, including
+  a pre-store serialisability check that raises rather than corrupting the cache.
+- `MemoryCache.invalidate_node(node, state, ...)` — invalidate a cached node
+  output for a specific node and input state; safe and idempotent when no entry
+  exists.
+- Formalized node-level caching / skip-detection as the emergent behaviour of
+  decorating graph nodes with `cached_node` (signature unchanged).
+- `langgraph` packaging extra (`pip install "memory-reuse[langgraph]"`);
+  LangGraph stays optional and is only imported lazily inside `wrap_graph`.
+
 ### Planned
-- Phase 3: graph-level and node-level execution reuse.
+- Node-level partial reuse refinements.
 
 ---
 
@@ -88,6 +113,7 @@ First public release. Phase 1 — exact caching.
 - Examples: basic exact cache, LangGraph agent, and a real LangGraph agent with a
   calculator and web-search tool.
 
-[Unreleased]: https://github.com/pranit-p/memory-reuse/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/pranit-p/memory-reuse/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.3.0
 [0.2.0]: https://github.com/pranit-p/memory-reuse/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.1.0

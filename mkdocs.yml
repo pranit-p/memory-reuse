@@ -77,6 +77,7 @@ nav:
       - Usage patterns: usage.md
       - Backends & scopes: backends.md
       - Semantic cache: semantic-cache.md
+      - Graph-level & node-level cache: graph-level-cache.md
       - Configuration reference: configuration.md
       - Cache statistics: statistics.md
       - Examples: examples.md

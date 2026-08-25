@@ -59,11 +59,9 @@ Semantic:  "What is order 123 status?"  ≈  "Where is my order 123?"
 > [Architecture guide](https://pranit-p.github.io/memory-reuse/architecture/)
 > for the full component and data-flow diagrams.
 
-> **Note on future levels.** The idea behind memory-reuse also covers
-> *node-level* and *graph-level* caching (skipping whole LangGraph nodes or an
-> entire agent run). Those are on the [roadmap](#roadmap) (Phase 3) and are not
-> part of this release — today's building blocks are the three cache types
-> above.
+> **Node-level and graph-level caching are here.** Beyond the three cache types
+> above, memory-reuse can skip whole LangGraph nodes or replay an entire agent
+> run from cache. See [Graph-level execution cache](#graph-level-execution-cache-wrap_graph).
 
 ---
 
@@ -408,6 +406,65 @@ embedding, so identical repeats stay as cheap as Phase 1.
 
 ---
 
+## Graph-level execution cache (`wrap_graph`)
+
+Wrap a compiled LangGraph graph so an entire run can be served from cache. On a
+hit the stored final result is replayed with **zero nodes executed**; on a miss
+the real graph runs and its final state is stored.
+
+Requires the `langgraph` extra: `pip install "memory-reuse[langgraph]"`.
+
+```python
+from memory_reuse import MemoryCache
+
+cache = MemoryCache()
+graph = build_graph().compile()          # your compiled LangGraph graph
+
+cached_graph = cache.wrap_graph(
+    graph,
+    scope="user",                         # global | user | session
+    key_fields=["question"],              # ignore ephemeral state fields
+    ttl=3600,
+)
+
+# Same signatures as the wrapped graph, plus per-call cache controls.
+result = await cached_graph.ainvoke({"question": "How do I reset my password?",
+                                     "user_id": "alice"})
+result = cached_graph.invoke({"question": "...", "user_id": "alice"})  # sync too
+```
+
+**Semantic matching.** Enable `semantic=True` (with `semantic_enabled=True` on
+the config) so reworded but equivalent questions reuse a stored run. A
+per-wrapper `similarity_threshold` overrides the config default.
+
+```python
+cached_graph = cache.wrap_graph(graph, semantic=True, similarity_threshold=0.92)
+```
+
+**Per-call controls.**
+
+- `bypass_cache=True` — always run the graph, skip the lookup.
+- `no_store=True` — run the graph but do not store the result.
+
+**Node-level invalidation.** Invalidate a single cached node output when its
+upstream state is known to have changed. Safe and idempotent when no entry
+exists.
+
+```python
+await cache.invalidate_node(summarise, {"messages": [...]}, scope="user",
+                            scope_id="alice", key_fields=["messages"])
+```
+
+> **Side effects.** Graph-level caching replays a full stored result. It is
+> **unsuitable for runs whose side effects must occur on every invocation**
+> (writes, emails, payments). Use `bypass_cache` / `no_store` for those, or
+> leave the graph unwrapped.
+
+See the [graph-level cache guide](https://pranit-p.github.io/memory-reuse/usage/#5-graph-level-execution-cache-wrap_graph)
+for the full walkthrough.
+
+---
+
 ## Configuration reference
 
 All options live on `CacheConfig`. Every field can also be set from an
@@ -480,7 +537,7 @@ python examples/langgraph_math_agent.py
 |---|---|---|
 | 1 | Exact cache (LLM + tool), Redis backend, LangGraph + LiteLLM | ✅ Shipped in v0.1 |
 | 2 | Semantic cache (embedding similarity, threshold control, answer extraction) | ✅ Shipped in v0.2 |
-| 3 | Graph-level and node-level execution reuse | Planned |
+| 3 | Graph-level and node-level execution reuse (`wrap_graph`, node skipping, `invalidate_node`) | ✅ Shipped in v0.3 |
 | 4 | Analytics dashboard, more framework integrations | Planned |
 
 ---

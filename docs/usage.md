@@ -68,3 +68,25 @@ embeddings = await cached_litellm_embedding(
     `cached_node`, `cached_tool`, and `cached_litellm_completion` all accept
     `semantic=True` (and `exact_only=True`) to route through the combined
     exact-then-semantic flow. See the [Semantic cache](semantic-cache.md) guide.
+
+## 5 — Graph-level & node-level cache (`wrap_graph`)
+
+Wrap a compiled LangGraph graph so an entire run can be served from cache, or
+decorate individual nodes so each is skipped on a hit. On a graph-level hit the
+stored final result is replayed with **zero nodes executed**.
+
+```python
+from memory_reuse import MemoryCache
+
+cache = MemoryCache()
+graph = build_graph().compile()
+cached_graph = cache.wrap_graph(graph, scope="user", key_fields=["question"])
+
+result = await cached_graph.ainvoke({"question": "...", "user_id": "alice"})
+```
+
+Requires the `langgraph` extra (`pip install "memory-reuse[langgraph]"`). See
+the dedicated [Graph-level & node-level cache](graph-level-cache.md) guide for
+the full walkthrough: `wrap_graph` options, key derivation, semantic matching,
+per-call `bypass_cache` / `no_store` controls, `cached_node` skip-detection,
+and `invalidate_node`.

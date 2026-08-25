@@ -1,6 +1,6 @@
 [project]
 name = "memory-reuse"
-version = "0.2.0"
+version = "0.3.0"
 description = "Execution cache layer for AI agents — cut LLM and tool call costs by reusing previous results."
 readme = "README.md"
 license = "MIT"
@@ -45,6 +45,9 @@ Changelog = "https://github.com/pranit-p/memory-reuse/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 redis = ["redis>=5.0.0"]
 litellm = ["litellm>=1.40.0"]
+# Graph-level execution cache. LangGraph is only ever imported lazily inside
+# wrap_graph / the node paths, so the core imports fine without this extra.
+langgraph = ["langgraph>=0.2.0"]
 # Semantic cache with API-based embeddings (OpenAI + LiteLLM). No torch — the
 # openai and litellm clients are small, and numpy is only a cosine-similarity
 # speedup (there is a pure-Python fallback). One flag covers both API providers.
@@ -69,7 +72,7 @@ docs = [
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.25",
 ]
-all = ["memory-reuse[redis,litellm,semantic-local]"]
+all = ["memory-reuse[redis,litellm,semantic-local,langgraph]"]
 
 [build-system]
 requires = ["hatchling"]
