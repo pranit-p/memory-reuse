@@ -12,18 +12,32 @@ to Phase 5. This file therefore asserts only over the three
 integration/backend extras this phase ships; it does *not* require the Phase 5
 extras to be present, so it stays green both before and after Phase 5 lands.
 
-Everything here is a pure, offline parse of ``pyproject.toml`` via ``tomllib``
-(Python 3.11+ stdlib) — no install, network, or subprocess.
+Everything here is a pure, offline parse of ``pyproject.toml`` — no install,
+network, or subprocess. TOML is read via ``tomllib`` (Python 3.11+ stdlib) with
+a fallback to the ``tomli`` backport on Python 3.10 and earlier.
 """
 
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
-import tomllib
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # Python 3.10 and earlier: fall back to the tomli backport
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:  # pragma: no cover - exercised only on <3.11 without tomli
+        pytest.skip(
+            "tomllib (3.11+) or the tomli backport is required to parse "
+            "pyproject.toml; install with `pip install tomli`.",
+            allow_module_level=True,
+        )
+
 from hypothesis import given
 from hypothesis import strategies as st
 
