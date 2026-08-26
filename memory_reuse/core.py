@@ -531,8 +531,21 @@ class MemoryCache:
                         "the MEMORY_REUSE_REDIS_URL environment variable."
                     )
                 return RedisBackend(url=self._config.redis_url)
+            case "agentcore":
+                from memory_reuse.backends.agentcore import (
+                    AgentCoreBackend,
+                    AgentCoreSettings,
+                )
+
+                settings = AgentCoreSettings(
+                    region=self._config.agentcore_region,
+                    memory_id=self._config.agentcore_memory_id,
+                )
+                # AgentCoreBackend.__init__ guards its own boto3 import and
+                # raises BackendNotAvailableError naming the extra when absent.
+                return AgentCoreBackend(settings)
             case _:
                 raise BackendNotAvailableError(
                     f"Unknown backend '{self._config.backend}'. "
-                    "Supported values: 'memory', 'redis'."
+                    "Supported values: 'memory', 'redis', 'agentcore'."
                 )

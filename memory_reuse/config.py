@@ -16,10 +16,15 @@ class CacheConfig:
 
     Attributes:
         backend: Storage backend to use. ``"memory"`` requires no extra
-            dependencies; ``"redis"`` requires ``pip install memory-reuse[redis]``.
+            dependencies; ``"redis"`` requires ``pip install memory-reuse[redis]``;
+            ``"agentcore"`` requires ``pip install memory-reuse[agentcore]``.
         redis_url: Connection URL for the Redis backend. Should be supplied
             via the ``MEMORY_REUSE_REDIS_URL`` environment variable rather
             than hardcoded.
+        agentcore_region: AWS region hosting the AgentCore store. Used only
+            when ``backend="agentcore"``.
+        agentcore_memory_id: AgentCore memory / store resource identifier.
+            Used only when ``backend="agentcore"``.
         default_ttl: Default time-to-live in seconds for cached entries.
             ``None`` means entries never expire.
         default_scope: Default cache scope applied when no explicit scope is
@@ -68,7 +73,7 @@ class CacheConfig:
         )
     """
 
-    backend: Literal["memory", "redis"] = "memory"
+    backend: Literal["memory", "redis", "agentcore"] = "memory"
     redis_url: str | None = None
     default_ttl: int | None = 3600
     default_scope: Literal["global", "user", "session"] = "global"
@@ -83,9 +88,21 @@ class CacheConfig:
     store_exact_on_semantic_hit: bool = True
     extract_answer: bool = False
     extract_min_similarity: float = 0.5
+    # Phase 4 (additive): AgentCore connection settings, used only when
+    # ``backend="agentcore"``. Left at their defaults, behaviour is identical
+    # to a pre-Phase-4 config (Req 11.3).
+    agentcore_region: str | None = None
+    agentcore_memory_id: str | None = None
 
     def __post_init__(self) -> None:
         """Validate the configuration after initialisation."""
+        if self.backend not in {"memory", "redis", "agentcore"}:
+            from memory_reuse.exceptions import ConfigurationError
+
+            raise ConfigurationError(
+                f"Unknown backend '{self.backend}'. "
+                "Supported values: 'memory', 'redis', 'agentcore'."
+            )
         if self.default_ttl is not None and self.default_ttl <= 0:
             from memory_reuse.exceptions import InvalidTTLError
 
@@ -122,8 +139,12 @@ class CacheConfig:
 
         Recognised variables:
 
-        * ``MEMORY_REUSE_BACKEND`` — ``"memory"`` or ``"redis"``
+        * ``MEMORY_REUSE_BACKEND`` — ``"memory"``, ``"redis"``, or ``"agentcore"``
         * ``MEMORY_REUSE_REDIS_URL`` — Redis connection URL
+        * ``MEMORY_REUSE_AGENTCORE_REGION`` — AWS region hosting the AgentCore
+          store (required when ``backend="agentcore"``)
+        * ``MEMORY_REUSE_AGENTCORE_MEMORY_ID`` — AgentCore memory / store resource
+          identifier (required when ``backend="agentcore"``)
         * ``MEMORY_REUSE_DEFAULT_TTL`` — integer seconds or ``"none"``
         * ``MEMORY_REUSE_DEFAULT_SCOPE`` — ``"global"``, ``"user"``, or ``"session"``
         * ``MEMORY_REUSE_KEY_PREFIX`` — string prefix for all keys
@@ -135,6 +156,12 @@ class CacheConfig:
 
         Returns:
             A :class:`CacheConfig` populated from the environment.
+
+        Raises:
+            ConfigurationError: If ``backend="agentcore"`` is selected but a
+                required AgentCore connection setting
+                (``MEMORY_REUSE_AGENTCORE_REGION`` or
+                ``MEMORY_REUSE_AGENTCORE_MEMORY_ID``) is absent.
         """
         raw_ttl = os.environ.get("MEMORY_REUSE_DEFAULT_TTL")
         if raw_ttl is None:
@@ -158,9 +185,26 @@ class CacheConfig:
 
         embedding_provider = os.environ.get("MEMORY_REUSE_EMBEDDING_PROVIDER")
 
+        agentcore_region = os.environ.get("MEMORY_REUSE_AGENTCORE_REGION")
+        agentcore_memory_id = os.environ.get("MEMORY_REUSE_AGENTCORE_MEMORY_ID")
+
+        if backend == "agentcore":
+            from memory_reuse.exceptions import ConfigurationError
+
+            if not agentcore_region:
+                raise ConfigurationError(
+                    "backend='agentcore' requires MEMORY_REUSE_AGENTCORE_REGION to be set."
+                )
+            if not agentcore_memory_id:
+                raise ConfigurationError(
+                    "backend='agentcore' requires MEMORY_REUSE_AGENTCORE_MEMORY_ID to be set."
+                )
+
         return cls(
             backend=backend,  # type: ignore[arg-type]
             redis_url=os.environ.get("MEMORY_REUSE_REDIS_URL"),
+            agentcore_region=agentcore_region,
+            agentcore_memory_id=agentcore_memory_id,
             default_ttl=default_ttl,
             default_scope=scope,  # type: ignore[arg-type]
             key_prefix=os.environ.get("MEMORY_REUSE_KEY_PREFIX", "memreuse"),

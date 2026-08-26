@@ -23,6 +23,9 @@ extras.
 | `litellm` | LiteLLM cached wrappers | `pip install "memory-reuse[litellm]"` |
 | `semantic` | Semantic cache with **API** embeddings (OpenAI / LiteLLM) — no torch | `pip install "memory-reuse[semantic]"` |
 | `semantic-local` | Semantic cache with **local** embeddings (sentence-transformers, pulls in torch) | `pip install "memory-reuse[semantic-local]"` |
+| `strands` | Strands Agents `cached_tool` integration | `pip install "memory-reuse[strands]"` |
+| `crewai` | CrewAI `cached_tool` integration | `pip install "memory-reuse[crewai]"` |
+| `agentcore` | AWS AgentCore shared backend | `pip install "memory-reuse[agentcore]"` |
 | `all` | Everything above | `pip install "memory-reuse[all]"` |
 
 !!! note "Two commands cover every embedding provider"

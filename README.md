@@ -87,6 +87,9 @@ uv add memory-reuse
 | `litellm` | LiteLLM cached wrappers | `pip install memory-reuse[litellm]` | `uv add memory-reuse[litellm]` |
 | `semantic` | Semantic cache with **API** embeddings (OpenAI / LiteLLM) — no torch | `pip install memory-reuse[semantic]` | `uv add memory-reuse[semantic]` |
 | `semantic-local` | Semantic cache with **local** embeddings (sentence-transformers, pulls in torch) | `pip install memory-reuse[semantic-local]` | `uv add memory-reuse[semantic-local]` |
+| `strands` | Strands Agents `cached_tool` integration | `pip install memory-reuse[strands]` | `uv add memory-reuse[strands]` |
+| `crewai` | CrewAI `cached_tool` integration | `pip install memory-reuse[crewai]` | `uv add memory-reuse[crewai]` |
+| `agentcore` | AWS AgentCore shared backend | `pip install memory-reuse[agentcore]` | `uv add memory-reuse[agentcore]` |
 | `all` | Everything above | `pip install memory-reuse[all]` | `uv add memory-reuse[all]` |
 
 > **Note:** `uv` is a fast Python package manager. If you don't have it yet:
@@ -172,6 +175,39 @@ embeddings = await cached_litellm_embedding(
 )
 ```
 
+### 5 — Strands / CrewAI tool caching
+
+Strands and CrewAI each get a `cached_tool` decorator that mirrors the LangGraph
+one — same signature `cached_tool(cache, *, scope="global", ttl=300,
+semantic=False, exact_only=False)`, same keying, scope resolution, TTL expiry,
+and exact-vs-semantic routing. They delegate to the shared caching machinery, so
+behaviour is identical across frameworks.
+
+**Strands** — requires `pip install "memory-reuse[strands]"`:
+
+```python
+from memory_reuse.integrations.strands import cached_tool
+
+@cached_tool(cache, scope="global", ttl=600)
+async def fetch_weather(city: str) -> dict:
+    return await weather_api.get(city)
+```
+
+**CrewAI** — requires `pip install "memory-reuse[crewai]"`:
+
+```python
+from memory_reuse.integrations.crewai import cached_tool
+
+@cached_tool(cache, scope="session", ttl=300)
+async def fetch_user_profile(user_id: str) -> dict:
+    return await db.get_user(user_id)
+```
+
+CrewAI adds one decoration-time guard: passing both `exact_only=True` and
+`semantic=True` is contradictory, so it raises `ConfigurationError` rather than
+silently ignoring one argument. Using either integration without its dependency
+installed raises `BackendNotAvailableError` naming the extra to install.
+
 ---
 
 ## Backend options
@@ -180,6 +216,7 @@ embeddings = await cached_litellm_embedding(
 |---------|---------------|-------------|-------|
 | `memory` | none | in-process only | LRU eviction, TTL support |
 | `redis` | `[redis]` | yes | connection pool, lazy connect |
+| `agentcore` | `[agentcore]` | yes | managed AWS store, shared across microVMs |
 
 Configure via code or environment variables:
 
@@ -193,6 +230,42 @@ export MEMORY_REUSE_DEFAULT_SCOPE=user
 ```python
 cache = MemoryCache.from_env()
 ```
+
+### AgentCore backend (AWS)
+
+The AgentCore backend targets the managed AWS AgentCore store, so a value cached
+in one AgentCore microVM is served to requests handled by another — solving the
+cross-microVM isolation problem where each VM starts with an empty in-memory
+cache. Requires `pip install "memory-reuse[agentcore]"`.
+
+Select it in code:
+
+```python
+from memory_reuse import MemoryCache, CacheConfig
+
+cache = MemoryCache(CacheConfig(
+    backend="agentcore",
+    agentcore_region="us-east-1",
+    agentcore_memory_id="mem-123",
+))
+```
+
+Or via environment variables read by `MemoryCache.from_env()`:
+
+```bash
+export MEMORY_REUSE_BACKEND=agentcore
+export MEMORY_REUSE_AGENTCORE_REGION=us-east-1
+export MEMORY_REUSE_AGENTCORE_MEMORY_ID=mem-123
+```
+
+```python
+cache = MemoryCache.from_env()
+```
+
+Selecting `backend="agentcore"` without the dependency installed raises
+`BackendNotAvailableError` naming the extra; selecting it via `from_env()`
+without `MEMORY_REUSE_AGENTCORE_REGION` or `MEMORY_REUSE_AGENTCORE_MEMORY_ID`
+raises `ConfigurationError` naming the missing setting.
 
 ---
 
@@ -472,8 +545,10 @@ environment variable (read by `MemoryCache.from_env()`) where noted.
 
 | Field | Type / accepted values | Default | Env var | Description |
 |---|---|---|---|---|
-| `backend` | `"memory"` \| `"redis"` | `"memory"` | `MEMORY_REUSE_BACKEND` | Storage backend. `redis` needs the `[redis]` extra. |
+| `backend` | `"memory"` \| `"redis"` \| `"agentcore"` | `"memory"` | `MEMORY_REUSE_BACKEND` | Storage backend. `redis` needs the `[redis]` extra; `agentcore` needs the `[agentcore]` extra. |
 | `redis_url` | `str` \| `None` | `None` | `MEMORY_REUSE_REDIS_URL` | Redis connection URL. Required when `backend="redis"`. |
+| `agentcore_region` | `str` \| `None` | `None` | `MEMORY_REUSE_AGENTCORE_REGION` | AWS region hosting the AgentCore store. Required when `backend="agentcore"`. |
+| `agentcore_memory_id` | `str` \| `None` | `None` | `MEMORY_REUSE_AGENTCORE_MEMORY_ID` | AgentCore memory / store resource id. Required when `backend="agentcore"`. |
 | `default_ttl` | `int > 0` \| `None` | `3600` | `MEMORY_REUSE_DEFAULT_TTL` (int or `"none"`) | Default entry TTL in seconds. `None` never expires. |
 | `default_scope` | `"global"` \| `"user"` \| `"session"` | `"global"` | `MEMORY_REUSE_DEFAULT_SCOPE` | Scope used when none is passed explicitly. |
 | `key_prefix` | `str` | `"memreuse"` | `MEMORY_REUSE_KEY_PREFIX` | Prefix prepended to every cache key. |
@@ -523,6 +598,12 @@ Runnable examples live in [`examples/`](examples/):
 - `semantic_agent.py` — a real ReAct agent (**calculator** + **web search**)
   whose LLM calls run through the **semantic cache** with a local embedding
   model, so reworded questions reuse cached answers.
+- `framework_tool_caching.py` — the **Strands** and **CrewAI** `cached_tool`
+  decorators: store-and-replay round trip plus the CrewAI `exact_only`+`semantic`
+  guard (offline, no framework install needed).
+- `agentcore_backend.py` — the **AWS AgentCore** shared backend: cross-microVM
+  cache sharing, byte round-trip, and TTL/connectivity semantics against an
+  in-process fake service (offline).
 
 ```bash
 export API_KEY="your-groq-key"          # example uses Groq via LiteLLM
@@ -538,7 +619,8 @@ python examples/langgraph_math_agent.py
 | 1 | Exact cache (LLM + tool), Redis backend, LangGraph + LiteLLM | ✅ Shipped in v0.1 |
 | 2 | Semantic cache (embedding similarity, threshold control, answer extraction) | ✅ Shipped in v0.2 |
 | 3 | Graph-level and node-level execution reuse (`wrap_graph`, node skipping, `invalidate_node`) | ✅ Shipped in v0.3 |
-| 4 | Analytics dashboard, more framework integrations | Planned |
+| 4 | Framework integrations (Strands, CrewAI) and the AWS AgentCore shared backend | ✅ Shipped in v0.4 |
+| 5 | Analytics dashboard, cost estimation, Prometheus + OpenTelemetry export | Planned |
 
 ---
 

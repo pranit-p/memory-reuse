@@ -11,6 +11,8 @@ directory of the repository.
 | `langgraph_math_agent.py` | A real ReAct agent with a **calculator** and a **web-search** tool, calling an LLM via LiteLLM. |
 | `semantic_cache_demo.py` | A reworded query hitting the **semantic cache** via the combined `lookup`/`store` flow (offline, no model download). |
 | `semantic_agent.py` | A real ReAct agent (**calculator** + **web search**) whose LLM calls run through the **semantic cache** with a local embedding model, plus per-user scoping and answer extraction. |
+| `framework_tool_caching.py` | The **Strands** and **CrewAI** `cached_tool` decorators — store-and-replay round trip and the CrewAI `exact_only`+`semantic` guard (offline, no framework install). |
+| `agentcore_backend.py` | The **AWS AgentCore** shared backend — cross-microVM cache sharing, byte round-trip, TTL/absence, and connectivity semantics against an in-process fake service (offline). |
 
 Running the LLM-backed examples (they use Groq via LiteLLM by default):
 

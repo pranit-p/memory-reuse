@@ -102,3 +102,51 @@ class TestFromEnv:
         monkeypatch.delenv("MEMORY_REUSE_EMBEDDING_PROVIDER", raising=False)
         with pytest.raises(ConfigurationError):
             CacheConfig.from_env()
+
+
+class TestFromEnvAgentCore:
+    """from_env parsing of the AgentCore backend selection (Req 9.3, 9.4)."""
+
+    def _clear(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in [
+            "MEMORY_REUSE_BACKEND",
+            "MEMORY_REUSE_AGENTCORE_REGION",
+            "MEMORY_REUSE_AGENTCORE_MEMORY_ID",
+            "MEMORY_REUSE_SEMANTIC_ENABLED",
+            "MEMORY_REUSE_EMBEDDING_PROVIDER",
+        ]:
+            monkeypatch.delenv(var, raising=False)
+
+    def test_agentcore_settings_populated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear(monkeypatch)
+        monkeypatch.setenv("MEMORY_REUSE_BACKEND", "agentcore")
+        monkeypatch.setenv("MEMORY_REUSE_AGENTCORE_REGION", "us-east-1")
+        monkeypatch.setenv("MEMORY_REUSE_AGENTCORE_MEMORY_ID", "mem-123")
+        config = CacheConfig.from_env()
+        assert config.backend == "agentcore"
+        assert config.agentcore_region == "us-east-1"
+        assert config.agentcore_memory_id == "mem-123"
+
+    def test_missing_region_raises_naming_setting(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear(monkeypatch)
+        monkeypatch.setenv("MEMORY_REUSE_BACKEND", "agentcore")
+        monkeypatch.setenv("MEMORY_REUSE_AGENTCORE_MEMORY_ID", "mem-123")
+        with pytest.raises(ConfigurationError, match="MEMORY_REUSE_AGENTCORE_REGION"):
+            CacheConfig.from_env()
+
+    def test_missing_memory_id_raises_naming_setting(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear(monkeypatch)
+        monkeypatch.setenv("MEMORY_REUSE_BACKEND", "agentcore")
+        monkeypatch.setenv("MEMORY_REUSE_AGENTCORE_REGION", "us-east-1")
+        with pytest.raises(ConfigurationError, match="MEMORY_REUSE_AGENTCORE_MEMORY_ID"):
+            CacheConfig.from_env()
+
+    def test_non_agentcore_backend_ignores_agentcore_settings(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._clear(monkeypatch)
+        monkeypatch.setenv("MEMORY_REUSE_BACKEND", "memory")
+        config = CacheConfig.from_env()
+        assert config.backend == "memory"
+        assert config.agentcore_region is None
+        assert config.agentcore_memory_id is None

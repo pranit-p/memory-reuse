@@ -13,6 +13,26 @@ _Nothing yet._
 
 ---
 
+## [0.4.0] — 2026-08-26
+
+### Added
+- **Phase 4 — framework integrations and shared backend.** New opt-in adapters
+  and a cloud-hosted backend, all off by default; existing code is unchanged and
+  the core still imports without any of the new optional dependencies.
+- Strands Agents `cached_tool` integration (`memory_reuse.integrations.strands`)
+  for caching Strands tool calls; opt-in via `pip install "memory-reuse[strands]"`.
+- CrewAI `cached_tool` integration (`memory_reuse.integrations.crewai`) for
+  caching CrewAI tool calls; opt-in via `pip install "memory-reuse[crewai]"`.
+  Rejects an `exact_only` + `semantic` conflict by raising `ConfigurationError`.
+- AWS AgentCore shared backend (`backend="agentcore"`) so multiple agents can
+  reuse a common cache, configured via `agentcore_region` / `agentcore_memory_id`
+  (and the matching `MEMORY_REUSE_AGENTCORE_REGION` / `MEMORY_REUSE_AGENTCORE_MEMORY_ID`
+  environment variables); opt-in via `pip install "memory-reuse[agentcore]"`.
+- Packaging extras `strands`, `crewai`, and `agentcore` (each folded into `all`);
+  the corresponding third-party packages stay optional and are imported lazily.
+
+---
+
 ## [0.3.0] — 2026-08-25
 
 ### Added
@@ -113,7 +133,8 @@ First public release. Phase 1 — exact caching.
 - Examples: basic exact cache, LangGraph agent, and a real LangGraph agent with a
   calculator and web-search tool.
 
-[Unreleased]: https://github.com/pranit-p/memory-reuse/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/pranit-p/memory-reuse/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.4.0
 [0.3.0]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.3.0
 [0.2.0]: https://github.com/pranit-p/memory-reuse/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.1.0

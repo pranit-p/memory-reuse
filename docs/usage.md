@@ -69,7 +69,32 @@ embeddings = await cached_litellm_embedding(
     `semantic=True` (and `exact_only=True`) to route through the combined
     exact-then-semantic flow. See the [Semantic cache](semantic-cache.md) guide.
 
-## 5 — Graph-level & node-level cache (`wrap_graph`)
+## 5 — Strands & CrewAI tool caching
+
+The Strands and CrewAI frameworks each get a `cached_tool` decorator with the
+same signature and behaviour as the LangGraph one above:
+
+```python
+# Strands — pip install "memory-reuse[strands]"
+from memory_reuse.integrations.strands import cached_tool
+
+@cached_tool(cache, scope="global", ttl=600)
+async def fetch_weather(city: str) -> dict:
+    return await weather_api.get(city)
+
+# CrewAI — pip install "memory-reuse[crewai]"
+from memory_reuse.integrations.crewai import cached_tool
+
+@cached_tool(cache, scope="session", ttl=300)
+async def fetch_user_profile(user_id: str) -> dict:
+    return await db.get_user(user_id)
+```
+
+See the [Framework integrations](framework-integrations.md) guide for the full
+walkthrough, including the CrewAI `exact_only` + `semantic` guard and the
+missing-dependency errors.
+
+## 6 — Graph-level & node-level cache (`wrap_graph`)
 
 Wrap a compiled LangGraph graph so an entire run can be served from cache, or
 decorate individual nodes so each is skipped on a hit. On a graph-level hit the

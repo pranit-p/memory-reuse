@@ -75,6 +75,7 @@ nav:
       - Quick start: quickstart.md
   - Guide:
       - Usage patterns: usage.md
+      - Framework integrations (Strands & CrewAI): framework-integrations.md
       - Backends & scopes: backends.md
       - Semantic cache: semantic-cache.md
       - Graph-level & node-level cache: graph-level-cache.md
@@ -84,6 +85,7 @@ nav:
   - API reference:
       - MemoryCache & config: api/core.md
       - Caches: api/caches.md
+      - Backends: api/backends.md
       - Embeddings: api/embeddings.md
       - Vector index: api/vector.md
       - Integrations: api/integrations.md

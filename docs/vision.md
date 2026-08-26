@@ -6,7 +6,7 @@
     long-term vision. It is kept for context on *why* the project exists and
     where it's headed. Not everything here is shipped yet.
 
-    **Shipped today (v0.2.0):**
+    **Shipped today:**
 
     - Exact cache, tool cache, and (opt-in) semantic cache
     - In-memory and Redis backends; in-memory and Redis vector indexes
@@ -15,13 +15,15 @@
     - LangGraph (`cached_node`, `cached_tool`) and LiteLLM integrations
     - Node-level and graph-level caching (`cache.wrap_graph`, node skipping,
       `invalidate_node`)
+    - **Phase 4 — Strands and CrewAI `cached_tool` integrations, plus the AWS
+      AgentCore shared backend (`backend="agentcore"`)**
 
-    **Planned (see the [roadmap](index.md) — Phase 4+), described below but not
+    **Planned (see the [roadmap](index.md) — Phase 5), described below but not
     yet available:**
 
-    - Strands / CrewAI integrations
-    - SQLite / Postgres / Qdrant backends and an AWS AgentCore backend
-    - Cost analytics dashboard and Prometheus / OpenTelemetry export
+    - SQLite / Postgres / Qdrant backends
+    - **Phase 5 — analytics + monitoring:** cost analytics dashboard, cost
+      estimation, and Prometheus / OpenTelemetry export
 
 ---
 
@@ -538,7 +540,7 @@ The **Status** column reflects what ships in v0.2.0 vs what is planned (see the
 | SQLite | ✅ | ⚠️ brute-force | ~1ms | Free | Single-machine persistence, no server | 🔜 Planned |
 | PostgreSQL + pgvector | ✅ | ✅ | 5–15ms | ~$0 if existing | Teams already on Postgres | 🔜 Planned |
 | Redis + Qdrant | ✅ | ✅ | <1ms | ~$30–50/mo | High-scale vector search | 🔜 Planned |
-| AWS AgentCore Memory | ✅ | ✅ | ~100–300ms | managed | Cross-microVM shared cache on AWS | 🔜 Planned |
+| AWS AgentCore Memory | ✅ | ✅ | ~100–300ms | managed | Cross-microVM shared cache on AWS | ✅ Shipped |
 | ElastiCache + OpenSearch | ✅ | ✅ | <1ms | ~$90/mo | AgentCore / AWS production | 🔜 Planned |
 
 **Decision rule:**
@@ -546,8 +548,8 @@ The **Status** column reflects what ships in v0.2.0 vs what is planned (see the
 - Production, shared across processes → Redis Stack or Upstash Redis (shipped)
 - Single machine, want persistence without a server → SQLite (planned)
 - Already on Postgres → PostgreSQL + pgvector (planned)
-- Deploying on AWS Bedrock AgentCore → AgentCore Memory, optionally with
-  ElastiCache as a hot layer (planned)
+- Deploying on AWS Bedrock AgentCore → AgentCore Memory (shipped), optionally
+  with ElastiCache as a hot layer (planned)
 - Very large vector scale → Redis + Qdrant (planned)
 
 ---
@@ -590,18 +592,21 @@ With SDK + Upstash + AgentCore Memory (Option D — Recommended):
 
 ### Install
 
-!!! note "Aspirational extras"
-    Some extras below (`agentcore`) and the `all` set are **planned**, not yet
-    shipped — see the [Backend roadmap](#backend-roadmap-implement-on-demand).
-    For current install instructions and the extras that exist today, see
-    [Install](install.md).
+!!! note "Some extras below are aspirational"
+    The `agentcore` extra (and the `strands` / `crewai` integrations) are
+    **shipped** (Phase 4). Other backends in this document
+    (SQLite / Postgres / Qdrant) remain **planned** — see the
+    [Backend roadmap](#backend-roadmap-implement-on-demand). For current install
+    instructions and the extras that exist today, see [Install](install.md).
 
 ```bash
 pip install memory-reuse                  # minimal, in-memory only
 pip install memory-reuse[redis]           # + Redis backend
 pip install memory-reuse[semantic]        # + semantic cache (API embeddings)
 pip install memory-reuse[semantic-local]  # + local embeddings (sentence-transformers)
-pip install memory-reuse[agentcore]       # + AWS AgentCore backend (planned)
+pip install memory-reuse[strands]         # + Strands cached_tool integration
+pip install memory-reuse[crewai]          # + CrewAI cached_tool integration
+pip install memory-reuse[agentcore]       # + AWS AgentCore backend
 pip install memory-reuse[all]             # everything
 ```
 
@@ -700,8 +705,8 @@ need appears — each has a specific trigger:
   vector search. *Trigger:* teams already running Postgres.
 - [ ] **Qdrant** — dedicated vector database for large-scale KNN. *Trigger:*
   millions of embeddings where vector search is the bottleneck.
-- [ ] **AWS AgentCore Memory** — managed, cross-microVM backend. *Trigger:*
-  deploying on Amazon Bedrock AgentCore (see Phase 4).
+- [x] **AWS AgentCore Memory** — managed, cross-microVM backend. Shipped in
+  Phase 4 (`backend="agentcore"`); see [Backends & scopes](backends.md).
 
 ### Phase 3 — Graph-Level Cache + Partial Reuse ✅ Shipped
 - [x] Graph-level execution cache (`cache.wrap_graph`)
@@ -709,12 +714,16 @@ need appears — each has a specific trigger:
 - [x] Detect which nodes can be skipped on similar requests
 - [x] Node-level cache invalidation
 
-### Phase 4 — Analytics + Integrations 🔜 Planned
+### Phase 4 — Integrations + Backend ✅ Shipped
+- [x] Strands Agents integration (`cached_tool`)
+- [x] CrewAI integration (`cached_tool`)
+- [x] AgentCore backend (managed AWS option, `backend="agentcore"`)
+
+### Phase 5 — Analytics + Monitoring 🔜 Planned
+- [ ] Analytics tracking: tokens saved, cost saved, latency saved
+- [ ] Cost estimation from configurable pricing
 - [ ] Real-time dashboard: hit rate, tokens saved, cost saved, latency saved
 - [ ] Prometheus + OpenTelemetry export
-- [ ] Strands Agents integration
-- [ ] CrewAI integration
-- [ ] AgentCore backend (managed AWS option)
 
 ---
 

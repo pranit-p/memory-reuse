@@ -1,0 +1,32 @@
+........................................................................ [ 17%]
+......ssssssssssssssssssssssss.......................................... [ 34%]
+........................................................................ [ 52%]
+........................................................................ [ 69%]
+........................................................................ [ 87%]
+.....................................................                    [100%]
+=========================== short test summary info ============================
+SKIPPED [1] tests/integration/test_redis_vector_index.py:92: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:102: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:106: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:111: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:122: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:130: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:141: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:153: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:160: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:170: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:180: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:190: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:196: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:202: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:211: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:217: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:221: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:231: Redis server not available at MEMORY_REUSE_REDIS_URL
+SKIPPED [1] tests/integration/test_redis_vector_index.py:312: Redis Stack search module not available on db 0
+SKIPPED [1] tests/integration/test_redis_vector_index.py:321: Redis Stack search module not available on db 0
+SKIPPED [1] tests/integration/test_redis_vector_index.py:329: Redis Stack search module not available on db 0
+SKIPPED [1] tests/integration/test_redis_vector_index.py:338: Redis Stack search module not available on db 0
+SKIPPED [1] tests/integration/test_redis_vector_index.py:345: Redis Stack search module not available on db 0
+SKIPPED [1] tests/integration/test_redis_vector_index.py:355: Redis Stack search module not available on db 0
+389 passed, 24 skipped in 44.68s

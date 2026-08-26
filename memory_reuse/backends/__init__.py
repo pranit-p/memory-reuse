@@ -8,10 +8,11 @@ Available backends:
   (requires ``pip install memory-reuse[redis]``).
 """
 
+from memory_reuse.backends.agentcore import AgentCoreBackend, AgentCoreSettings
 from memory_reuse.backends.base import AbstractBackend
 from memory_reuse.backends.memory import InMemoryBackend
 
-__all__ = ["AbstractBackend", "InMemoryBackend"]
+__all__ = ["AbstractBackend", "AgentCoreBackend", "AgentCoreSettings", "InMemoryBackend"]
 
 try:
     from memory_reuse.backends.redis import RedisBackend  # noqa: F401
