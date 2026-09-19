@@ -1,6 +1,6 @@
 [project]
 name = "memory-reuse"
-version = "0.5.0"
+version = "0.6.0"
 description = "Execution cache layer for AI agents — cut LLM and tool call costs by reusing previous results."
 readme = "README.md"
 license = "MIT"
@@ -71,6 +71,9 @@ agentcore = ["boto3>=1.34"]
 # guard, so the core (and memory_reuse.analytics) imports fine without them.
 prometheus = ["prometheus-client>=0.20"]
 opentelemetry = ["opentelemetry-api>=1.24", "opentelemetry-sdk>=1.24"]
+# Phase 6 LangChain (de)serialization codec for faithful round-trip of message
+# objects through wrap_graph. Imported lazily inside the codec factory.
+langchain = ["langchain-core>=0.2.0"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -86,7 +89,7 @@ docs = [
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.25",
 ]
-all = ["memory-reuse[redis,litellm,semantic-local,langgraph,strands,crewai,agentcore,prometheus,opentelemetry]"]
+all = ["memory-reuse[redis,litellm,semantic-local,langgraph,strands,crewai,agentcore,prometheus,opentelemetry,langchain]"]
 
 [project.scripts]
 memory-reuse = "memory_reuse.cli:main"

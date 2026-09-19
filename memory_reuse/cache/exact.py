@@ -76,6 +76,23 @@ class ExactCache:
             ScopeViolationError: If ``scope`` requires a ``scope_id`` but
                 none is provided.
         """
+        return await self._get(key_parts, scope, scope_id, deserializer=self._config.deserializer)
+
+    async def _get(
+        self,
+        key_parts: list,
+        scope: str,
+        scope_id: str | None,
+        *,
+        deserializer: Any = None,
+    ) -> Any | None:
+        """Internal get that accepts a per-call deserializer override.
+
+        The public :meth:`get` delegates here with the config's deserializer;
+        callers that need a per-call override (for example a wrapped graph using
+        the LangChain codec) pass their own without changing the public
+        signature.
+        """
         self._check_scope(scope, scope_id)
         key = self._build_key(key_parts, scope, scope_id)
 
@@ -93,7 +110,7 @@ class ExactCache:
 
         self._stats.record_hit()
         logger.debug("ExactCache: HIT scope=%s", scope)
-        return deserialize_value(raw)
+        return deserialize_value(raw, deserializer=deserializer)
 
     async def set(
         self,
@@ -118,12 +135,32 @@ class ExactCache:
             ScopeViolationError: If ``scope`` requires a ``scope_id`` but
                 none is provided.
         """
+        await self._set(
+            key_parts, value, scope, scope_id, ttl=ttl, serializer=self._config.serializer
+        )
+
+    async def _set(
+        self,
+        key_parts: list,
+        value: Any,
+        scope: str,
+        scope_id: str | None,
+        *,
+        ttl: int | None = None,
+        serializer: Any = None,
+    ) -> None:
+        """Internal set that accepts a per-call serializer override.
+
+        The public :meth:`set` delegates here with the config's serializer;
+        callers that need a per-call override pass their own without changing
+        the public signature.
+        """
         self._check_scope(scope, scope_id)
         key = self._build_key(key_parts, scope, scope_id)
         effective_ttl = ttl if ttl is not None else self._config.default_ttl
 
         try:
-            raw = serialize_value(value)
+            raw = serialize_value(value, serializer=serializer)
             await self._backend.set(key, raw, ttl=effective_ttl)
             logger.debug("ExactCache: SET scope=%s", scope)
         except Exception:
@@ -174,7 +211,13 @@ class ExactCache:
         Raises:
             ValueError: If the resulting key exceeds ``max_key_size``.
         """
-        key = build_cache_key(self._config.key_prefix, scope, scope_id, *key_parts)
+        key = build_cache_key(
+            self._config.key_prefix,
+            scope,
+            scope_id,
+            *key_parts,
+            version=self._config.cache_version,
+        )
         if len(key.encode("utf-8")) > self._config.max_key_size:
             raise ValueError(f"Cache key exceeds max_key_size={self._config.max_key_size} bytes")
         return key

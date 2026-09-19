@@ -172,6 +172,8 @@ class TestMemoryCacheSignatures:
 
     def test_lookup_signature(self) -> None:
         params = inspect.signature(MemoryCache.lookup).parameters
+        # Phase 6 appended optional serializer/deserializer overrides (default
+        # None), keeping the pre-Phase-6 params, order, and defaults intact.
         assert list(params) == [
             "self",
             "key_parts",
@@ -180,14 +182,20 @@ class TestMemoryCacheSignatures:
             "scope_id",
             "exact_only",
             "threshold",
+            "serializer",
+            "deserializer",
         ]
         for name in ("scope", "scope_id", "exact_only", "threshold"):
             assert params[name].kind is inspect.Parameter.KEYWORD_ONLY
         assert params["exact_only"].default is False
         assert params["threshold"].default is None
+        # Additive Phase 6 overrides default to None (no-op).
+        assert params["serializer"].default is None
+        assert params["deserializer"].default is None
 
     def test_store_signature(self) -> None:
         params = inspect.signature(MemoryCache.store).parameters
+        # Phase 6 appended an optional serializer override (default None).
         assert list(params) == [
             "self",
             "key_parts",
@@ -197,11 +205,13 @@ class TestMemoryCacheSignatures:
             "scope_id",
             "ttl",
             "exact_only",
+            "serializer",
         ]
         for name in ("scope", "scope_id", "ttl", "exact_only"):
             assert params[name].kind is inspect.Parameter.KEYWORD_ONLY
         assert params["ttl"].default is None
         assert params["exact_only"].default is False
+        assert params["serializer"].default is None
 
     def test_wrap_graph_signature(self) -> None:
         """``wrap_graph`` keeps its Phase 3 parameter names, order, and defaults."""
@@ -216,6 +226,8 @@ class TestMemoryCacheSignatures:
             "key_fields",
             "exact_only",
             "graph_id",
+            # Phase 6 additive: zero-config faithful serialization control.
+            "serialize_messages",
         ]
         assert params["graph"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
         for name in (
@@ -226,6 +238,7 @@ class TestMemoryCacheSignatures:
             "key_fields",
             "exact_only",
             "graph_id",
+            "serialize_messages",
         ):
             assert params[name].kind is inspect.Parameter.KEYWORD_ONLY
         assert params["semantic"].default is False
@@ -235,6 +248,8 @@ class TestMemoryCacheSignatures:
         assert params["key_fields"].default is None
         assert params["exact_only"].default is False
         assert params["graph_id"].default is None
+        # Phase 6 additive default: "auto" (enable codec when langchain present).
+        assert params["serialize_messages"].default == "auto"
 
 
 class TestExactCacheSignatures:

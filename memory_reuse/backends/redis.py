@@ -215,3 +215,54 @@ class RedisBackend(AbstractBackend):
                 await self._client.aclose()
             self._client = None
             logger.debug("RedisBackend: connection pool closed")
+
+    # ------------------------------------------------------------------
+    # Distributed lock (Phase 6 single-flight support)
+    # ------------------------------------------------------------------
+
+    # Delete-if-owner: only the holder whose token matches may release the lock,
+    # so a lock that already expired and was re-acquired by another holder is
+    # never released out from under them.
+    _RELEASE_SCRIPT = (
+        "if redis.call('get', KEYS[1]) == ARGV[1] then "
+        "return redis.call('del', KEYS[1]) else return 0 end"
+    )
+
+    async def acquire_lock(self, key: str, token: str, ttl_ms: int) -> bool:
+        """Attempt to acquire a per-key lock with an expiry (``SET NX PX``).
+
+        Args:
+            key: The lock key.
+            token: A unique token identifying this holder, checked on release.
+            ttl_ms: Lock expiry in milliseconds so a crashed holder cannot
+                deadlock other processes.
+
+        Returns:
+            ``True`` if the lock was acquired, ``False`` if already held.
+
+        Raises:
+            BackendConnectionError: On Redis connectivity failure.
+        """
+        client = await self._get_client()
+        try:
+            acquired = await client.set(key, token, nx=True, px=ttl_ms)
+            return bool(acquired)
+        except Exception as exc:
+            raise BackendConnectionError("Redis lock acquire failed") from exc
+
+    async def release_lock(self, key: str, token: str) -> None:
+        """Release a per-key lock, but only if this holder still owns it.
+
+        Uses a delete-if-owner Lua script so a lock that already expired and was
+        re-acquired by a different holder is never released by mistake. Failures
+        are swallowed — a lock left to expire on its own is safe.
+
+        Args:
+            key: The lock key.
+            token: The token supplied at acquire time.
+        """
+        try:
+            client = await self._get_client()
+            await client.eval(self._RELEASE_SCRIPT, 1, key, token)
+        except Exception:
+            logger.debug("RedisBackend: lock release skipped (best-effort)")

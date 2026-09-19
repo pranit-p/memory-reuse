@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
@@ -12,7 +13,14 @@ from memory_reuse.backends.memory import InMemoryBackend
 from memory_reuse.cache.exact import ExactCache
 from memory_reuse.cache.tool import ToolCache
 from memory_reuse.config import CacheConfig
-from memory_reuse.exceptions import BackendNotAvailableError
+from memory_reuse.exceptions import BackendNotAvailableError, ConfigurationError
+from memory_reuse.execution import SingleFlight
+from memory_reuse.optimizer import (
+    EffectivenessAnalyzer,
+    EffectivenessReport,
+    OperationRecord,
+    OperationTracker,
+)
 from memory_reuse.stats import CacheStats, StatsTracker
 
 if TYPE_CHECKING:
@@ -82,6 +90,28 @@ class MemoryCache:
         # Constructed only when semantic caching is enabled; ``None`` otherwise
         # so no embedding/vector dependency is imported for exact-only users.
         self.semantic: SemanticCache | None = self._maybe_build_semantic()
+
+        # Phase 6: opt-in single-flight coalescing of concurrent misses. Built
+        # only when enabled so exact-only / pre-Phase-6 users pay nothing. The
+        # distributed lock requires the Redis backend.
+        if self._config.distributed_lock and self._config.backend != "redis":
+            raise ConfigurationError(
+                "distributed_lock=True requires backend='redis'; "
+                f"got backend={self._config.backend!r}."
+            )
+        self._single_flight: SingleFlight | None = (
+            SingleFlight(self._backend, distributed=self._config.distributed_lock)
+            if self._config.single_flight
+            else None
+        )
+
+        # Phase 6: effectiveness analyzer. Records per-operation observations
+        # (best-effort, bounded) and turns them into advisory recommendations.
+        # Enabled alongside stats; it never mutates the stats/analytics counters.
+        self._op_tracker = OperationTracker(
+            enabled=self._config.enable_stats,
+            max_operations=self._config.max_tracked_operations,
+        )
 
         logger.debug(
             "MemoryCache initialised: backend=%s stats=%s semantic=%s",
@@ -232,6 +262,8 @@ class MemoryCache:
         scope_id: str | None,
         exact_only: bool = False,
         threshold: float | None = None,
+        serializer: Callable[[Any], Any] | None = None,
+        deserializer: Callable[[Any], Any] | None = None,
     ) -> Any | None:
         """Look up a cached value, trying the exact cache before the semantic cache.
 
@@ -250,6 +282,13 @@ class MemoryCache:
                 example a tool with side effects).
             threshold: Optional per-call similarity threshold overriding
                 :attr:`~memory_reuse.config.CacheConfig.similarity_threshold`.
+            serializer: Optional per-call serializer override used when promoting
+                a semantic hit to the exact cache. Falls back to the configured
+                serializer when ``None``. Used by ``wrap_graph``'s automatic
+                codec; most callers leave it ``None``.
+            deserializer: Optional per-call deserializer override applied to the
+                exact-cache read. Falls back to the configured deserializer when
+                ``None``.
 
         Returns:
             The cached value on an exact or semantic hit, or ``None`` on a miss.
@@ -258,7 +297,12 @@ class MemoryCache:
             ScopeViolationError: If ``scope`` requires a ``scope_id`` but none
                 is provided.
         """
-        exact_result = await self.exact.get(key_parts, scope=scope, scope_id=scope_id)
+        effective_deser = deserializer if deserializer is not None else self._config.deserializer
+        effective_ser = serializer if serializer is not None else self._config.serializer
+
+        exact_result = await self.exact._get(  # noqa: SLF001
+            key_parts, scope, scope_id, deserializer=effective_deser
+        )
         if exact_result is not None:
             # Req 7.2 / 11.1: an exact hit returns immediately, never embedding.
             return exact_result
@@ -273,7 +317,9 @@ class MemoryCache:
         if semantic_result is not None and self._config.store_exact_on_semantic_hit:
             # Req 7.4: promote the semantic hit to the exact cache so the next
             # identical request takes the faster exact path.
-            await self.exact.set(key_parts, semantic_result, scope=scope, scope_id=scope_id)
+            await self.exact._set(  # noqa: SLF001
+                key_parts, semantic_result, scope, scope_id, serializer=effective_ser
+            )
         return semantic_result
 
     async def store(
@@ -286,6 +332,7 @@ class MemoryCache:
         scope_id: str | None,
         ttl: int | None = None,
         exact_only: bool = False,
+        serializer: Callable[[Any], Any] | None = None,
     ) -> None:
         """Store a value in the exact cache and, when enabled, the semantic cache.
 
@@ -305,17 +352,163 @@ class MemoryCache:
                 ``None``.
             exact_only: When ``True``, only the exact-match entry is written and
                 the semantic cache is left untouched.
+            serializer: Optional per-call serializer override. Falls back to the
+                configured serializer when ``None``. Used by ``wrap_graph``'s
+                automatic codec; most callers leave it ``None``.
 
         Raises:
             ScopeViolationError: If ``scope`` requires a ``scope_id`` but none
                 is provided.
         """
-        await self.exact.set(key_parts, value, scope=scope, scope_id=scope_id, ttl=ttl)
+        effective_ser = serializer if serializer is not None else self._config.serializer
+        await self.exact._set(  # noqa: SLF001
+            key_parts, value, scope, scope_id, ttl=ttl, serializer=effective_ser
+        )
 
         if exact_only or self.semantic is None:
             return
 
         await self.semantic.set(query_text, value, scope=scope, scope_id=scope_id, ttl=ttl)
+
+    # ------------------------------------------------------------------
+    # Single-flight coalescing (Phase 6)
+    # ------------------------------------------------------------------
+
+    async def get_or_compute(
+        self,
+        key_parts: list,
+        compute: Callable[[], Any],
+        *,
+        scope: str,
+        scope_id: str | None,
+        ttl: int | None = None,
+        query_text: str = "",
+        exact_only: bool = False,
+    ) -> Any:
+        """Look up a value, computing it at most once across concurrent callers.
+
+        On a hit the stored value is returned without running ``compute``. On a
+        miss, when ``single_flight`` is enabled, concurrent calls for the same
+        key coalesce so ``compute`` runs exactly once and its result is shared
+        with every waiter (Phase 6, Req 1); otherwise this is a plain
+        miss→compute→store. The computed value is stored via the combined
+        :meth:`store` flow (exact, plus semantic when ``query_text`` is supplied
+        and semantic is enabled).
+
+        Args:
+            key_parts: Ordered list of values identifying the entry.
+            compute: A zero-argument callable (sync or async) producing the value
+                on a miss.
+            scope: Cache scope — ``"global"``, ``"user"``, or ``"session"``.
+            scope_id: User or session identifier for non-global scopes.
+            ttl: Time-to-live in seconds for the stored result.
+            query_text: Optional natural-language query enabling semantic storage
+                of the computed value.
+            exact_only: When ``True``, never consult or write the semantic cache.
+
+        Returns:
+            The cached value on a hit, or the freshly computed value on a miss.
+
+        Raises:
+            ScopeViolationError: If ``scope`` requires a ``scope_id`` but none is
+                provided.
+        """
+
+        async def _compute() -> Any:
+            result = compute()
+            if inspect.isawaitable(result):
+                result = await result
+            return result
+
+        async def _load() -> Any:
+            return await self.lookup(
+                key_parts,
+                query_text,
+                scope=scope,
+                scope_id=scope_id,
+                exact_only=exact_only,
+            )
+
+        async def _store(value: Any) -> None:
+            await self.store(
+                key_parts,
+                query_text,
+                value,
+                scope=scope,
+                scope_id=scope_id,
+                ttl=ttl,
+                exact_only=exact_only,
+            )
+
+        if self._single_flight is None:
+            # No coalescing: plain miss → compute → store, matching Phase 5.
+            existing = await _load()
+            if existing is not None:
+                return existing
+            value = await _compute()
+            await _store(value)
+            return value
+
+        # Single-flight keys on the derived exact-cache key so concurrent callers
+        # for the same logical entry coalesce.
+        key = self.exact._build_key(key_parts, scope, scope_id)  # noqa: SLF001
+        return await self._single_flight.run(key, compute=_compute, load=_load, store=_store)
+
+    # ------------------------------------------------------------------
+    # Effectiveness analysis (Phase 6)
+    # ------------------------------------------------------------------
+
+    def record_operation(
+        self,
+        operation: str,
+        *,
+        hit: bool,
+        cost_saved: float | None = None,
+        latency_saved: float | None = None,
+        input_hash: str | None = None,
+        cached: bool = False,
+        volatile: bool = False,
+    ) -> None:
+        """Record a per-operation observation for the effectiveness analyzer (Phase 6).
+
+        Best-effort and never fatal; a no-op when ``enable_stats`` is ``False``.
+        The ``cached`` and ``volatile`` flags are caller-supplied signals the
+        recommendation rules use — the analyzer cannot infer a tool's caching
+        status or data-freshness on its own.
+
+        Args:
+            operation: Label identifying the operation (tool/node/graph name).
+            hit: ``True`` when served from cache, ``False`` on a miss.
+            cost_saved: Optional attributed cost for this observation.
+            latency_saved: Optional attributed latency (seconds).
+            input_hash: Optional stable fingerprint of the inputs, used to
+                estimate the repeat ratio.
+            cached: Whether the operation is already configured to be cached.
+            volatile: Whether the operation returns rapidly-changing data.
+        """
+        self._op_tracker.record(
+            OperationRecord(
+                operation=operation,
+                hit=hit,
+                cost_saved=cost_saved,
+                latency_saved=latency_saved,
+                input_hash=input_hash,
+                cached=cached,
+                volatile=volatile,
+            )
+        )
+
+    def analyze(self) -> EffectivenessReport:
+        """Return per-operation statistics and advisory cache recommendations (Phase 6).
+
+        The recommendations are advisory only — reading them never changes cache
+        behaviour. On a cache with no recorded observations this returns an empty
+        report rather than raising.
+
+        Returns:
+            An :class:`~memory_reuse.optimizer.EffectivenessReport`.
+        """
+        return EffectivenessAnalyzer(self._op_tracker).analyze()
 
     # ------------------------------------------------------------------
     # Graph-level cache (Phase 3)
@@ -332,6 +525,7 @@ class MemoryCache:
         key_fields: list[str] | None = None,
         exact_only: bool = False,
         graph_id: str | None = None,
+        serialize_messages: str | bool = "auto",
     ) -> CachedGraph:
         """Wrap a compiled LangGraph graph so entire runs can be served from cache.
 
@@ -360,6 +554,18 @@ class MemoryCache:
             graph_id: Stable identifier for this graph included in the key so
                 different wrapped graphs never collide. Defaults to a value
                 derived from the graph object.
+            serialize_messages: Controls automatic faithful serialization of the
+                wrapped graph's results so a cache **hit** replays real LangChain
+                message objects (with ``.content``), identical to a **miss** —
+                plug-and-play, no codec wiring. ``"auto"`` (the default) enables
+                it when ``langchain-core`` is importable and silently falls back
+                to the default JSON serialization when it is not. ``True`` forces
+                it on (raising a named error if ``langchain-core`` is absent).
+                ``False`` disables it. When a serializer/deserializer is already
+                configured on the cache, that explicit choice always wins and
+                this option is ignored. The codec applies only to this wrapped
+                graph's store/load, never to the cache's exact/tool/semantic
+                layers for other callers.
 
         Returns:
             A :class:`~memory_reuse.integrations.langgraph.CachedGraph` wrapper.
@@ -384,6 +590,7 @@ class MemoryCache:
 
         resolved_scope = scope if scope is not None else self._config.default_scope
         resolved_graph_id = _resolve_graph_id(graph, graph_id)
+        graph_serializer, graph_deserializer = self._resolve_graph_codec(serialize_messages)
 
         return CachedGraph(
             self,
@@ -395,7 +602,39 @@ class MemoryCache:
             key_fields=key_fields,
             exact_only=exact_only,
             graph_id=resolved_graph_id,
+            serializer=graph_serializer,
+            deserializer=graph_deserializer,
         )
+
+    def _resolve_graph_codec(
+        self, serialize_messages: str | bool
+    ) -> tuple[Callable[[Any], Any] | None, Callable[[Any], Any] | None]:
+        """Resolve the (serializer, deserializer) a wrapped graph should use (Req 10).
+
+        An explicit serializer configured on the cache always wins (Req 10.6).
+        Otherwise ``serialize_messages`` decides: ``False`` → the default (no
+        override); ``"auto"`` → the LangChain codec when importable, else the
+        default silently (Req 10.3); ``True`` → the LangChain codec, re-raising
+        the named error if LangChain is absent so the explicit intent is honoured.
+        """
+        # Req 10.6: an explicit config codec wins; the graph adds no override.
+        if self._config.serializer is not None or self._config.deserializer is not None:
+            return None, None
+
+        if serialize_messages is False:
+            return None, None
+
+        from memory_reuse.integrations.langchain_serde import langchain_message_codec
+
+        if serialize_messages == "auto":
+            try:
+                return langchain_message_codec()
+            except BackendNotAvailableError:
+                # LangChain not installed: silently keep default serialization.
+                return None, None
+        # serialize_messages is True (or any other truthy explicit value):
+        # honour it, surfacing the named error if LangChain is missing.
+        return langchain_message_codec()
 
     async def invalidate_node(
         self,

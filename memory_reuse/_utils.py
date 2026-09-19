@@ -33,7 +33,13 @@ def sanitize_key(key: str) -> str:
     return _SAFE_KEY_RE.sub("_", key)
 
 
-def build_cache_key(prefix: str, scope: str, scope_id: str | None, *parts: Any) -> str:
+def build_cache_key(
+    prefix: str,
+    scope: str,
+    scope_id: str | None,
+    *parts: Any,
+    version: str | None = None,
+) -> str:
     """Build a namespaced, deterministic cache key.
 
     The resulting key follows the pattern::
@@ -49,6 +55,11 @@ def build_cache_key(prefix: str, scope: str, scope_id: str | None, *parts: Any) 
             Must be provided for non-global scopes.
         *parts: Arbitrary values that together identify the cached item.
             They are JSON-serialised and hashed.
+        version: Optional cache-version token (Phase 6). When provided it is
+            mixed into the hashed parts so results generated under different
+            versions never collide. When ``None`` (the default) the hash is
+            computed over exactly ``parts`` — byte-identical to the pre-Phase-6
+            key — so existing cached entries continue to hit after an upgrade.
 
     Returns:
         A colon-separated cache key string.
@@ -59,7 +70,10 @@ def build_cache_key(prefix: str, scope: str, scope_id: str | None, *parts: Any) 
     if scope != "global" and not scope_id:
         raise ValueError(f"scope_id is required for scope='{scope}'")
 
-    parts_hash = hash_value(list(parts))
+    # The version is only prepended when set, so ``version=None`` hashes exactly
+    # the caller's parts and reproduces the pre-Phase-6 key byte-for-byte.
+    hashed_parts = list(parts) if version is None else ["__v__", version, *parts]
+    parts_hash = hash_value(hashed_parts)
     safe_prefix = sanitize_key(prefix)
     safe_scope = sanitize_key(scope)
 
@@ -98,7 +112,7 @@ def check_scope(scope: str, scope_id: str | None) -> None:
         )
 
 
-def build_namespace(scope: str, scope_id: str | None) -> str:
+def build_namespace(scope: str, scope_id: str | None, version: str | None = None) -> str:
     """Build the vector-index namespace string for a scope.
 
     The namespace encodes the cache scope so a similarity search never crosses
@@ -111,6 +125,12 @@ def build_namespace(scope: str, scope_id: str | None) -> str:
     Args:
         scope: One of ``"global"``, ``"user"``, or ``"session"``.
         scope_id: The scope identifier. Required for non-global scopes.
+        version: Optional cache-version token (Phase 6). When set it is prefixed
+            onto the namespace so a semantic *search* is isolated per version — a
+            vector stored under version A lives in a different namespace than one
+            stored under version B and can never be returned as a match for it.
+            When ``None`` (the default) the namespace is byte-identical to the
+            pre-Phase-6 namespace, so existing vectors keep matching.
 
     Returns:
         The namespace string.
@@ -120,9 +140,10 @@ def build_namespace(scope: str, scope_id: str | None) -> str:
             ``scope_id`` (delegated to :func:`check_scope`).
     """
     check_scope(scope, scope_id)
-    if scope == "global":
-        return "global"
-    return f"{scope}:{scope_id}"
+    base = "global" if scope == "global" else f"{scope}:{scope_id}"
+    if version is None:
+        return base
+    return f"v:{version}:{base}"
 
 
 def hash_value(value: Any) -> str:
@@ -201,11 +222,17 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return (cos + 1.0) / 2.0
 
 
-def serialize_value(value: Any) -> bytes:
+def serialize_value(value: Any, *, serializer: Any = None) -> bytes:
     """Serialise and gzip-compress a value for storage in the backend.
 
     Args:
         value: Any JSON-serialisable value.
+        serializer: Optional callable that converts ``value`` into a JSON-native
+            representation *before* the JSON/gzip step. When ``None`` (the
+            default) the value is serialised exactly as before — so behaviour is
+            byte-identical for callers that do not configure a hook. This is the
+            extension point that lets framework objects (for example LangChain
+            message objects) round-trip faithfully via a paired ``deserializer``.
 
     Returns:
         gzip-compressed JSON bytes.
@@ -213,15 +240,22 @@ def serialize_value(value: Any) -> bytes:
     Raises:
         TypeError: If ``value`` cannot be JSON-serialised.
     """
+    if serializer is not None:
+        value = serializer(value)
     raw = json.dumps(value, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
     return gzip.compress(raw, compresslevel=6)
 
 
-def deserialize_value(data: bytes) -> Any:
+def deserialize_value(data: bytes, *, deserializer: Any = None) -> Any:
     """Decompress and deserialise bytes produced by :func:`serialize_value`.
 
     Args:
         data: gzip-compressed JSON bytes.
+        deserializer: Optional callable that reconstructs the original value from
+            the JSON-native representation *after* the gzip/JSON step. When
+            ``None`` (the default) the parsed JSON is returned as-is — byte-
+            identical to the pre-hook behaviour. Pair it with the ``serializer``
+            passed to :func:`serialize_value` for a faithful round-trip.
 
     Returns:
         The original Python object.
@@ -231,9 +265,12 @@ def deserialize_value(data: bytes) -> Any:
     """
     try:
         raw = gzip.decompress(data)
-        return json.loads(raw.decode("utf-8"))
+        obj = json.loads(raw.decode("utf-8"))
     except Exception as exc:
         raise ValueError(f"Failed to deserialise cached value: {exc}") from exc
+    if deserializer is not None:
+        return deserializer(obj)
+    return obj
 
 
 # Sentence boundary: a period, question mark, or exclamation mark (optionally

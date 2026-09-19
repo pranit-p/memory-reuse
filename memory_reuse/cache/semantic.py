@@ -112,7 +112,7 @@ class SemanticCache:
                 is provided.
         """
         check_scope(scope, scope_id)
-        namespace = build_namespace(scope, scope_id)
+        namespace = build_namespace(scope, scope_id, self._config.cache_version)
         effective_threshold = self._effective_threshold(threshold)
 
         try:
@@ -142,7 +142,7 @@ class SemanticCache:
 
         self._stats.record_semantic_hit()
         logger.debug("SemanticCache: HIT scope=%s score=%.4f", scope, matches[0].score)
-        value = deserialize_value(matches[0].value)
+        value = deserialize_value(matches[0].value, deserializer=self._config.deserializer)
 
         if self._config.extract_answer:
             value = await self._maybe_extract_answer(value, embedding)
@@ -176,7 +176,7 @@ class SemanticCache:
                 is provided.
         """
         check_scope(scope, scope_id)
-        namespace = build_namespace(scope, scope_id)
+        namespace = build_namespace(scope, scope_id, self._config.cache_version)
 
         if precomputed_embedding is not None:
             embedding = precomputed_embedding
@@ -193,7 +193,7 @@ class SemanticCache:
         record_id = hash_value([provider_model, query_text])
         record = VectorRecord(
             vector=embedding,
-            value=serialize_value(value),
+            value=serialize_value(value, serializer=self._config.serializer),
             provider_model=provider_model,
             expires_at=self._index.expiry_for_ttl(effective_ttl),
         )

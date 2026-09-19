@@ -101,6 +101,16 @@ class TestCacheConfigFields:
         # Phase 5 additive field: optional per-token pricing for analytics,
         # default ``None`` (cost untracked) so pre-Phase-5 behaviour is unchanged.
         "pricing": None,
+        # Phase 6 additive fields: version-aware identity, single-flight
+        # coalescing, the analyzer aggregate cap, and the optional
+        # (de)serialization hooks — all default to the no-op value so pre-Phase-6
+        # behaviour (and byte-identical keys) is unchanged.
+        "cache_version": None,
+        "single_flight": False,
+        "distributed_lock": False,
+        "max_tracked_operations": 1000,
+        "serializer": None,
+        "deserializer": None,
     }
 
     def test_field_names_and_order_unchanged(self) -> None:

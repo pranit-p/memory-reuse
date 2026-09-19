@@ -92,7 +92,7 @@ class ToolCache:
 
         self._stats.record_hit()
         logger.debug("ToolCache: HIT tool=%s scope=%s", tool_name, scope)
-        return deserialize_value(raw)
+        return deserialize_value(raw, deserializer=self._config.deserializer)
 
     async def set(
         self,
@@ -124,7 +124,7 @@ class ToolCache:
         key = self._build_key(tool_name, args, scope, scope_id)
 
         try:
-            raw = serialize_value(value)
+            raw = serialize_value(value, serializer=self._config.serializer)
             await self._backend.set(key, raw, ttl=ttl)
             logger.debug("ToolCache: SET tool=%s scope=%s ttl=%d", tool_name, scope, ttl)
         except Exception:
@@ -153,7 +153,15 @@ class ToolCache:
         Returns:
             Cache key string.
         """
-        key = build_cache_key(self._config.key_prefix, scope, scope_id, "tool", tool_name, args)
+        key = build_cache_key(
+            self._config.key_prefix,
+            scope,
+            scope_id,
+            "tool",
+            tool_name,
+            args,
+            version=self._config.cache_version,
+        )
         if len(key.encode("utf-8")) > self._config.max_key_size:
             raise ValueError(f"Cache key exceeds max_key_size={self._config.max_key_size} bytes")
         return key

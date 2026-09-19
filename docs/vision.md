@@ -21,13 +21,15 @@
     - **Phase 5 — observability & cost analytics:** tokens / cost / latency
       saved on top of hit rate (`cache.analytics`, `PricingConfig`), the
       `memory-reuse` CLI, and opt-in Prometheus / OpenTelemetry exporters
+    - **Phase 6 — intelligent execution optimization:** single-flight stampede
+      protection (`get_or_compute`, optional Redis distributed lock),
+      version-aware cache identity (`cache_version`), and the effectiveness
+      analyzer + recommendations (`record_operation`, `analyze`)
 
     **Planned (see the [roadmap](index.md)), described below but not yet
     available:**
 
     - SQLite / Postgres / Qdrant backends
-    - **Phase 6 — intelligent execution optimization:** effectiveness analyzer,
-      cache recommendations, stampede protection, version-aware cache identity
 
 ---
 
@@ -731,11 +733,12 @@ need appears — each has a specific trigger:
 - [ ] Real-time web dashboard — *deferred*: the serialisable snapshot + CLI
   cover the same need with far less surface; a web view can be added on top later.
 
-### Phase 6 — Intelligent Execution Optimization 🔜 Planned
-- [ ] Cache effectiveness analyzer over execution history
-- [ ] Automatic cache recommendations (the "execution optimizer")
-- [ ] Stampede protection (single-flight / distributed lock)
-- [ ] Version-aware cache identity
+### Phase 6 — Intelligent Execution Optimization ✅ Shipped
+- [x] Stampede protection — in-process single-flight (`get_or_compute`) plus an
+  optional cross-process Redis distributed lock (`distributed_lock`)
+- [x] Version-aware cache identity (`cache_version`) folded into every key
+- [x] Cache effectiveness analyzer over recorded execution observations
+- [x] Automatic, advisory cache recommendations (the "execution optimizer")
 
 ---
 

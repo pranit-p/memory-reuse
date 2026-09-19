@@ -447,6 +447,8 @@ class CachedGraph:
         key_fields: list[str] | None,
         exact_only: bool,
         graph_id: str,
+        serializer: Callable[[Any], Any] | None = None,
+        deserializer: Callable[[Any], Any] | None = None,
     ) -> None:
         self._cache = cache
         self._graph = graph
@@ -457,6 +459,11 @@ class CachedGraph:
         self._key_fields = key_fields
         self._exact_only = exact_only
         self._graph_id = graph_id
+        # Phase 6: per-graph (de)serialization codec so a cache hit replays real
+        # framework objects (e.g. LangChain messages) identical to a miss. When
+        # ``None`` the graph uses the cache's configured/default serialization.
+        self._serializer = serializer
+        self._deserializer = deserializer
 
     # ------------------------------------------------------------------
     # Public API
@@ -497,6 +504,8 @@ class CachedGraph:
                 scope_id=scope_id,
                 exact_only=self._exact_only or not self._semantic,
                 threshold=self._similarity_threshold,
+                serializer=self._serializer,
+                deserializer=self._deserializer,
             )
             if cached is not None:
                 logger.debug("CachedGraph: HIT graph=%s scope=%s", self._graph_id, self._scope)
@@ -515,6 +524,7 @@ class CachedGraph:
                 scope_id=scope_id,
                 ttl=self._ttl,
                 exact_only=self._exact_only or not self._semantic,
+                serializer=self._serializer,
             )
         return result
 
@@ -553,6 +563,8 @@ class CachedGraph:
                     scope_id=scope_id,
                     exact_only=self._exact_only or not self._semantic,
                     threshold=self._similarity_threshold,
+                    serializer=self._serializer,
+                    deserializer=self._deserializer,
                 )
             )
             if cached is not None:
@@ -573,6 +585,7 @@ class CachedGraph:
                     scope_id=scope_id,
                     ttl=self._ttl,
                     exact_only=self._exact_only or not self._semantic,
+                    serializer=self._serializer,
                 )
             )
         return result
@@ -595,13 +608,15 @@ class CachedGraph:
             )
         return scope_id
 
-    @staticmethod
-    def _check_serialisable(final_result: Any) -> None:
+    def _check_serialisable(self, final_result: Any) -> None:
         """Validate the final result serialises before storing (Req 8.3).
 
         Raises a clear :exc:`ValueError` on failure so no partial or corrupt
         entry is written, leaving ``ExactCache``'s best-effort behaviour for
-        other callers unchanged.
+        other callers unchanged. Applies the cache's configured ``serializer``
+        (if any) so that a graph whose result needs a codec — for example
+        LangChain message objects — validates against the same conversion that
+        will be used to store it, rather than the raw un-encoded value.
 
         Args:
             final_result: The value about to be stored.
@@ -609,8 +624,11 @@ class CachedGraph:
         Raises:
             ValueError: If the value cannot be serialised for storage.
         """
+        serializer = (
+            self._serializer if self._serializer is not None else self._cache._config.serializer
+        )
         try:
-            serialize_value(final_result)
+            serialize_value(final_result, serializer=serializer)
         except Exception as exc:
             raise ValueError(
                 f"CachedGraph: final result is not serialisable for caching: {exc}"
