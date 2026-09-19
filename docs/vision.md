@@ -18,12 +18,16 @@
     - **Phase 4 — Strands and CrewAI `cached_tool` integrations, plus the AWS
       AgentCore shared backend (`backend="agentcore"`)**
 
-    **Planned (see the [roadmap](index.md) — Phase 5), described below but not
-    yet available:**
+    - **Phase 5 — observability & cost analytics:** tokens / cost / latency
+      saved on top of hit rate (`cache.analytics`, `PricingConfig`), the
+      `memory-reuse` CLI, and opt-in Prometheus / OpenTelemetry exporters
+
+    **Planned (see the [roadmap](index.md)), described below but not yet
+    available:**
 
     - SQLite / Postgres / Qdrant backends
-    - **Phase 5 — analytics + monitoring:** cost analytics dashboard, cost
-      estimation, and Prometheus / OpenTelemetry export
+    - **Phase 6 — intelligent execution optimization:** effectiveness analyzer,
+      cache recommendations, stampede protection, version-aware cache identity
 
 ---
 
@@ -719,11 +723,19 @@ need appears — each has a specific trigger:
 - [x] CrewAI integration (`cached_tool`)
 - [x] AgentCore backend (managed AWS option, `backend="agentcore"`)
 
-### Phase 5 — Analytics + Monitoring 🔜 Planned
-- [ ] Analytics tracking: tokens saved, cost saved, latency saved
-- [ ] Cost estimation from configurable pricing
-- [ ] Real-time dashboard: hit rate, tokens saved, cost saved, latency saved
-- [ ] Prometheus + OpenTelemetry export
+### Phase 5 — Observability & Cost Analytics ✅ Shipped
+- [x] Analytics tracking: tokens saved, cost saved, latency saved
+- [x] Cost estimation from configurable pricing (`PricingConfig`)
+- [x] Programmatic snapshot (`cache.analytics`) and `memory-reuse` CLI
+- [x] Prometheus + OpenTelemetry export
+- [ ] Real-time web dashboard — *deferred*: the serialisable snapshot + CLI
+  cover the same need with far less surface; a web view can be added on top later.
+
+### Phase 6 — Intelligent Execution Optimization 🔜 Planned
+- [ ] Cache effectiveness analyzer over execution history
+- [ ] Automatic cache recommendations (the "execution optimizer")
+- [ ] Stampede protection (single-flight / distributed lock)
+- [ ] Version-aware cache identity
 
 ---
 

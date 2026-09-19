@@ -98,6 +98,9 @@ class TestCacheConfigFields:
         # after the pre-Phase-4 fields so existing behaviour is unchanged.
         "agentcore_region": None,
         "agentcore_memory_id": None,
+        # Phase 5 additive field: optional per-token pricing for analytics,
+        # default ``None`` (cost untracked) so pre-Phase-5 behaviour is unchanged.
+        "pricing": None,
     }
 
     def test_field_names_and_order_unchanged(self) -> None:

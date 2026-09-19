@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
+from memory_reuse.analytics import AnalyticsSnapshot, AnalyticsTracker, CacheHitEvent
 from memory_reuse.backends.base import AbstractBackend
 from memory_reuse.backends.memory import InMemoryBackend
 from memory_reuse.cache.exact import ExactCache
@@ -66,6 +67,15 @@ class MemoryCache:
 
         self._backend: AbstractBackend = self._create_backend()
         self._stats_tracker = StatsTracker()
+        # Phase 5: savings analytics layered on the shared stats tracker. It
+        # reads hit rate from ``_stats_tracker`` and never mutates its counters,
+        # so exact-only / pre-Phase-5 behaviour is unchanged. Disabled with
+        # stats so ``enable_stats=False`` zeroes analytics too.
+        self._analytics = AnalyticsTracker(
+            self._stats_tracker,
+            pricing=self._config.pricing,
+            enabled=self._config.enable_stats,
+        )
 
         self.exact = ExactCache(self._backend, self._config, self._stats_tracker)
         self.tool = ToolCache(self._backend, self._config, self._stats_tracker)
@@ -164,6 +174,50 @@ class MemoryCache:
     def reset_stats(self) -> None:
         """Reset all hit/miss/error counters to zero."""
         self._stats_tracker.reset()
+
+    # ------------------------------------------------------------------
+    # Analytics (Phase 5)
+    # ------------------------------------------------------------------
+
+    @property
+    def analytics(self) -> AnalyticsSnapshot:
+        """Current savings-analytics snapshot (Phase 5).
+
+        Returns an immutable :class:`~memory_reuse.analytics.AnalyticsSnapshot`
+        with the current hit rate (read from the same counters as
+        :attr:`stats`), plus tokens, cost, and latency saved. On a fresh cache —
+        and whenever ``enable_stats`` is ``False`` — the snapshot is fully
+        zeroed. Adding this accessor does not change :attr:`stats` or
+        :class:`~memory_reuse.stats.CacheStats`.
+
+        Returns:
+            An :class:`~memory_reuse.analytics.AnalyticsSnapshot`.
+
+        Example::
+
+            print(cache.analytics.tokens_saved, cache.analytics.cost_saved)
+        """
+        return self._analytics.snapshot()
+
+    def record_hit_event(self, event: CacheHitEvent) -> None:
+        """Record the savings a cache hit avoided (Phase 5).
+
+        Attribution is caller-supplied — the core caches do not know an
+        operation's token/cost/latency — so integrations or application code
+        call this on a hit to feed the analytics layer. Recording is best-effort
+        and never fatal, and is a no-op when ``enable_stats`` is ``False``.
+
+        Args:
+            event: The :class:`~memory_reuse.analytics.CacheHitEvent` describing
+                the tokens, cost, and/or latency the hit avoided.
+
+        Example::
+
+            cache.record_hit_event(CacheHitEvent(
+                tokens_in=1200, tokens_out=400, latency_saved=0.4,
+                operation="search_confluence"))
+        """
+        self._analytics.record_hit_event(event)
 
     # ------------------------------------------------------------------
     # Combined exact + semantic API

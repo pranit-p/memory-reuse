@@ -81,6 +81,7 @@ nav:
       - Graph-level & node-level cache: graph-level-cache.md
       - Configuration reference: configuration.md
       - Cache statistics: statistics.md
+      - Cost analytics: analytics.md
       - Examples: examples.md
   - API reference:
       - MemoryCache & config: api/core.md

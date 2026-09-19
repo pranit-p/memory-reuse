@@ -69,6 +69,11 @@ class TestPublicSymbolSurface:
         "BackendNotAvailableError",
         "ScopeViolationError",
         "InvalidTTLError",
+        # Phase 5 additive exports (analytics). New public symbols added
+        # deliberately; nothing pre-existing was removed or renamed (Req 8.6).
+        "AnalyticsSnapshot",
+        "CacheHitEvent",
+        "PricingConfig",
     }
 
     def test_top_level_all_unchanged(self) -> None:

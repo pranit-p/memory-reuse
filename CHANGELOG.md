@@ -13,6 +13,35 @@ _Nothing yet._
 
 ---
 
+## [0.5.0] — 2026-09-19
+
+### Added
+- **Phase 5 — observability & cost analytics.** A savings-attribution layer over
+  the existing statistics, all opt-in and additive; existing code is unchanged
+  and the core still imports without any new optional dependency.
+- Analytics tracking of **tokens saved**, **cost saved**, and **latency saved**
+  on top of the existing hit-rate counters. New `memory_reuse.analytics` package
+  exposing `AnalyticsTracker`, `CacheHitEvent`, `AnalyticsSnapshot`, and
+  `PricingConfig`. The tracker layers on the shared `StatsTracker` and never
+  changes how `hits` / `misses` / `total_requests` are counted.
+- Provider-agnostic per-token pricing (`PricingConfig`) with ISO 4217 currency
+  handling; cost contributions are accumulated at full precision and rounded to
+  the currency minor unit only when reported, so many small per-hit savings sum
+  correctly instead of each rounding to zero.
+- New `MemoryCache.analytics` snapshot accessor and `MemoryCache.record_hit_event(...)`
+  for caller-supplied attribution, plus an optional `CacheConfig.pricing` field
+  (default `None` — cost untracked). The LiteLLM completion wrapper now
+  attributes avoided tokens on a cache hit (best-effort, no signature change).
+- `memory-reuse` command-line tool (`memory-reuse stats` / `memory-reuse savings`)
+  rendering a dumped analytics snapshot; standard-library only, no extra needed.
+- Prometheus exporter (`memory_reuse.analytics.exporters.prometheus`) and
+  OpenTelemetry exporter (`memory_reuse.analytics.exporters.opentelemetry`),
+  each opt-in and lazily imported.
+- Packaging extras `prometheus` and `opentelemetry` (each folded into `all`);
+  the corresponding third-party packages stay optional and are imported lazily.
+
+---
+
 ## [0.4.0] — 2026-08-26
 
 ### Added
@@ -133,7 +162,8 @@ First public release. Phase 1 — exact caching.
 - Examples: basic exact cache, LangGraph agent, and a real LangGraph agent with a
   calculator and web-search tool.
 
-[Unreleased]: https://github.com/pranit-p/memory-reuse/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/pranit-p/memory-reuse/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.5.0
 [0.4.0]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.4.0
 [0.3.0]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.3.0
 [0.2.0]: https://github.com/pranit-p/memory-reuse/compare/v0.1.0...v0.2.0

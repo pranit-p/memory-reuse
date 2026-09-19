@@ -90,6 +90,8 @@ uv add memory-reuse
 | `strands` | Strands Agents `cached_tool` integration | `pip install memory-reuse[strands]` | `uv add memory-reuse[strands]` |
 | `crewai` | CrewAI `cached_tool` integration | `pip install memory-reuse[crewai]` | `uv add memory-reuse[crewai]` |
 | `agentcore` | AWS AgentCore shared backend | `pip install memory-reuse[agentcore]` | `uv add memory-reuse[agentcore]` |
+| `prometheus` | Prometheus analytics exporter | `pip install memory-reuse[prometheus]` | `uv add memory-reuse[prometheus]` |
+| `opentelemetry` | OpenTelemetry analytics exporter | `pip install memory-reuse[opentelemetry]` | `uv add memory-reuse[opentelemetry]` |
 | `all` | Everything above | `pip install memory-reuse[all]` | `uv add memory-reuse[all]` |
 
 > **Note:** `uv` is a fast Python package manager. If you don't have it yet:
@@ -585,6 +587,76 @@ your hits came from the faster exact path versus semantic matching.
 
 ---
 
+## Cost analytics
+
+Beyond hit rate, memory-reuse can quantify the work a cache eliminated —
+**tokens saved**, **cost saved**, and **latency saved** — so you can answer
+"how much did the cache actually save me?". It layers on the same counters as
+`stats`; nothing changes when you don't use it.
+
+Attribution is **caller-supplied**: the cache can't know a call's token or
+latency cost, so you record it on a hit (the LiteLLM completion wrapper does
+this automatically from the response's `usage` block). Supply a `PricingConfig`
+to turn saved tokens into a saved amount:
+
+```python
+from memory_reuse import CacheConfig, CacheHitEvent, MemoryCache, PricingConfig
+
+cache = MemoryCache(CacheConfig(
+    pricing=PricingConfig(
+        input_token_price=0.0000005,     # $0.50 / 1M input tokens
+        output_token_price=0.0000015,    # $1.50 / 1M output tokens
+        currency="USD",
+    ),
+))
+
+# On a cache hit, record what the hit avoided:
+cache.record_hit_event(CacheHitEvent(
+    tokens_in=1200, tokens_out=400, latency_saved=0.4,
+    operation="search_confluence",
+))
+
+snap = cache.analytics
+print(snap.tokens_saved, snap.cost_saved, snap.currency, snap.latency_saved)
+```
+
+Cost is accumulated at full precision and only rounded to the currency's minor
+unit when read, so many small per-hit savings still sum correctly. With no
+`PricingConfig`, `cost_saved` stays `0` while tokens and latency still track.
+When `enable_stats=False`, analytics is fully zeroed.
+
+### CLI
+
+Dump a snapshot from your app and inspect it with the `memory-reuse` command
+(standard library only — no extra required):
+
+```python
+from memory_reuse.cli import dump_snapshot
+dump_snapshot(cache, "snapshot.json")
+```
+
+```bash
+memory-reuse stats   --snapshot snapshot.json
+memory-reuse savings --snapshot snapshot.json
+```
+
+### Prometheus / OpenTelemetry export
+
+Publish the analytics to your monitoring stack. Both exporters are opt-in and
+read the snapshot at scrape/collection time.
+
+```python
+# pip install "memory-reuse[prometheus]"
+from memory_reuse.analytics.exporters.prometheus import PrometheusExporter
+PrometheusExporter(lambda: cache.analytics, lambda: cache.stats)
+
+# pip install "memory-reuse[opentelemetry]"
+from memory_reuse.analytics.exporters.opentelemetry import OpenTelemetryExporter
+OpenTelemetryExporter(lambda: cache.analytics)
+```
+
+---
+
 ## Examples
 
 Runnable examples live in [`examples/`](examples/):
@@ -604,10 +676,20 @@ Runnable examples live in [`examples/`](examples/):
 - `agentcore_backend.py` — the **AWS AgentCore** shared backend: cross-microVM
   cache sharing, byte round-trip, and TTL/connectivity semantics against an
   in-process fake service (offline).
+- `cost_analytics_demo.py` — the **cost analytics** layer: a miss + repeated
+  hits accumulate **tokens / cost / latency saved**, printed as a snapshot and
+  dumped for the `memory-reuse` CLI (offline, no API key).
+- `agentcore_analytics_otel.py` — seeing savings on **AWS AgentCore Runtime**:
+  the `OpenTelemetryExporter` + `record_hit_event` handler pattern, plus a
+  runnable offline demo simulating per-microVM metrics aggregating into a fleet
+  total (as CloudWatch would).
 
 ```bash
 export API_KEY="your-groq-key"          # example uses Groq via LiteLLM
 python examples/langgraph_math_agent.py
+
+# The analytics demo needs no API key:
+python examples/cost_analytics_demo.py
 ```
 
 ---
@@ -620,7 +702,7 @@ python examples/langgraph_math_agent.py
 | 2 | Semantic cache (embedding similarity, threshold control, answer extraction) | ✅ Shipped in v0.2 |
 | 3 | Graph-level and node-level execution reuse (`wrap_graph`, node skipping, `invalidate_node`) | ✅ Shipped in v0.3 |
 | 4 | Framework integrations (Strands, CrewAI) and the AWS AgentCore shared backend | ✅ Shipped in v0.4 |
-| 5 | Analytics dashboard, cost estimation, Prometheus + OpenTelemetry export | Planned |
+| 5 | Cost analytics (tokens/cost/latency saved), CLI, Prometheus + OpenTelemetry export | ✅ Shipped |
 
 ---
 

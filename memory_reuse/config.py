@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from memory_reuse.analytics.pricing import PricingConfig
 
 
 @dataclass
@@ -62,6 +65,11 @@ class CacheConfig:
             :attr:`extract_answer` to return just that sentence. When no
             sentence clears this bar the full stored answer is returned, so
             extraction never yields an empty result.
+        pricing: Optional per-token
+            :class:`~memory_reuse.analytics.pricing.PricingConfig` used by the
+            analytics layer to compute cost saved from tokens saved. ``None``
+            (the default) means cost is not tracked; token and latency savings
+            are still tracked. Set in code, not via an environment variable.
 
     Example::
 
@@ -93,6 +101,12 @@ class CacheConfig:
     # to a pre-Phase-4 config (Req 11.3).
     agentcore_region: str | None = None
     agentcore_memory_id: str | None = None
+    # Phase 5 (additive): optional per-token pricing used to compute cost saved
+    # in the analytics layer. ``None`` means cost is not tracked (token and
+    # latency savings still are). Left at its default, behaviour is identical to
+    # a pre-Phase-5 config. This is a structured object, so it is set in code
+    # rather than via an environment variable; ``from_env`` does not read it.
+    pricing: PricingConfig | None = None
 
     def __post_init__(self) -> None:
         """Validate the configuration after initialisation."""

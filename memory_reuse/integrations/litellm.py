@@ -96,6 +96,39 @@ def _scope_id_from_kwargs(
     return None
 
 
+def _record_completion_savings(cache: MemoryCache, cached_response: Any) -> None:
+    """Attribute the tokens a completion cache hit avoided to analytics (Phase 5).
+
+    The stored response is the ``model_dump()`` dict of a LiteLLM
+    ``ModelResponse``, which carries a ``usage`` block with
+    ``prompt_tokens`` / ``completion_tokens``. On a cache hit those tokens were
+    *not* re-spent, so they are recorded as saved. This is entirely best-effort:
+    a missing or malformed ``usage`` block never raises, and recording is a
+    no-op when ``enable_stats`` is ``False`` (handled by the tracker).
+
+    Args:
+        cache: The :class:`~memory_reuse.core.MemoryCache` to record against.
+        cached_response: The stored completion response (typically a dict).
+    """
+    from memory_reuse.analytics import CacheHitEvent
+
+    try:
+        usage = cached_response.get("usage") if isinstance(cached_response, dict) else None
+        if not isinstance(usage, dict):
+            return
+        tokens_in = usage.get("prompt_tokens")
+        tokens_out = usage.get("completion_tokens")
+        cache.record_hit_event(
+            CacheHitEvent(
+                tokens_in=tokens_in if isinstance(tokens_in, int) else None,
+                tokens_out=tokens_out if isinstance(tokens_out, int) else None,
+                operation="litellm.completion",
+            )
+        )
+    except Exception:  # noqa: BLE001 — attribution is strictly best-effort
+        logger.debug("cached_litellm_completion: savings attribution skipped")
+
+
 # ---------------------------------------------------------------------------
 # Public wrappers
 # ---------------------------------------------------------------------------
@@ -194,6 +227,7 @@ async def cached_litellm_completion(
         cached_response = await cache.exact.get(key_parts, scope=scope, scope_id=scope_id)
     if cached_response is not None:
         logger.debug("cached_litellm_completion: HIT model=%s scope=%s", model, scope)
+        _record_completion_savings(cache, cached_response)
         return cached_response
 
     logger.debug(

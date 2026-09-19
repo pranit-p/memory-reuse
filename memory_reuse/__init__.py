@@ -19,6 +19,11 @@ Quick start::
         ...
 """
 
+from memory_reuse.analytics import (
+    AnalyticsSnapshot,
+    CacheHitEvent,
+    PricingConfig,
+)
 from memory_reuse.config import CacheConfig
 from memory_reuse.core import MemoryCache
 from memory_reuse.exceptions import (
@@ -34,6 +39,9 @@ __all__ = [
     "MemoryCache",
     "CacheConfig",
     "CacheStats",
+    "AnalyticsSnapshot",
+    "CacheHitEvent",
+    "PricingConfig",
     "AgentMemoryError",
     "BackendConnectionError",
     "BackendNotAvailableError",
@@ -41,4 +49,4 @@ __all__ = [
     "InvalidTTLError",
 ]
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
