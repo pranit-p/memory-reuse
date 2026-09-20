@@ -13,6 +13,25 @@ _Nothing yet._
 
 ---
 
+## [0.6.1] — 2026-09-20
+
+### Fixed
+- **Faithful serialization now covers the semantic-cache path.** The optional
+  `serializer` / `deserializer` codec (and `wrap_graph`'s automatic LangChain
+  message codec) was applied on the exact-cache path but not the semantic one,
+  so a *semantic* cache hit could replay values as raw strings — a wrapped graph
+  then failed with `'str' object has no attribute 'content'`. `SemanticCache`
+  now threads the per-call codec through both its read and write paths (via
+  internal `_get` / `_set`), and `MemoryCache.lookup` / `store` pass the codec to
+  the semantic layer as well as the exact layer. Public signatures are unchanged.
+- The LangChain message codec now reconstructs tool-calling messages robustly by
+  loading with `allowed_objects="messages"` and `ignore_unserializable_fields=True`,
+  so an `AIMessage` carrying a provider-specific tool-call object still rebuilds
+  as a real message on a cache hit instead of raising `NotImplementedError` or
+  degrading to a bare dict.
+
+---
+
 ## [0.6.0] — 2026-09-20
 
 ### Added
@@ -202,7 +221,8 @@ First public release. Phase 1 — exact caching.
 - Examples: basic exact cache, LangGraph agent, and a real LangGraph agent with a
   calculator and web-search tool.
 
-[Unreleased]: https://github.com/pranit-p/memory-reuse/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/pranit-p/memory-reuse/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.6.1
 [0.6.0]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.6.0
 [0.5.0]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.5.0
 [0.4.0]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.4.0

@@ -1,6 +1,6 @@
 [project]
 name = "memory-reuse"
-version = "0.6.0"
+version = "0.6.1"
 description = "Execution cache layer for AI agents — cut LLM and tool call costs by reusing previous results."
 readme = "README.md"
 license = "MIT"

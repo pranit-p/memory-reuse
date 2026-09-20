@@ -111,6 +111,30 @@ class SemanticCache:
             ScopeViolationError: If ``scope`` requires a ``scope_id`` but none
                 is provided.
         """
+        return await self._get(
+            query_text,
+            scope,
+            scope_id,
+            threshold=threshold,
+            deserializer=self._config.deserializer,
+        )
+
+    async def _get(
+        self,
+        query_text: str,
+        scope: str,
+        scope_id: str | None,
+        *,
+        threshold: float | None = None,
+        deserializer: Any = None,
+    ) -> Any | None:
+        """Internal get that accepts a per-call deserializer override.
+
+        The public :meth:`get` delegates here with the config's deserializer;
+        callers that need a per-call override (a wrapped graph using the
+        LangChain codec) pass their own so a semantic hit reconstructs framework
+        objects faithfully, not as strings.
+        """
         check_scope(scope, scope_id)
         namespace = build_namespace(scope, scope_id, self._config.cache_version)
         effective_threshold = self._effective_threshold(threshold)
@@ -142,7 +166,7 @@ class SemanticCache:
 
         self._stats.record_semantic_hit()
         logger.debug("SemanticCache: HIT scope=%s score=%.4f", scope, matches[0].score)
-        value = deserialize_value(matches[0].value, deserializer=self._config.deserializer)
+        value = deserialize_value(matches[0].value, deserializer=deserializer)
 
         if self._config.extract_answer:
             value = await self._maybe_extract_answer(value, embedding)
@@ -175,6 +199,33 @@ class SemanticCache:
             ScopeViolationError: If ``scope`` requires a ``scope_id`` but none
                 is provided.
         """
+        await self._set(
+            query_text,
+            value,
+            scope,
+            scope_id,
+            ttl=ttl,
+            precomputed_embedding=precomputed_embedding,
+            serializer=self._config.serializer,
+        )
+
+    async def _set(
+        self,
+        query_text: str,
+        value: Any,
+        scope: str,
+        scope_id: str | None,
+        *,
+        ttl: int | None = None,
+        precomputed_embedding: list[float] | None = None,
+        serializer: Any = None,
+    ) -> None:
+        """Internal set that accepts a per-call serializer override.
+
+        The public :meth:`set` delegates here with the config's serializer;
+        callers that need a per-call override pass their own so a stored semantic
+        entry round-trips framework objects faithfully.
+        """
         check_scope(scope, scope_id)
         namespace = build_namespace(scope, scope_id, self._config.cache_version)
 
@@ -193,7 +244,7 @@ class SemanticCache:
         record_id = hash_value([provider_model, query_text])
         record = VectorRecord(
             vector=embedding,
-            value=serialize_value(value, serializer=self._config.serializer),
+            value=serialize_value(value, serializer=serializer),
             provider_model=provider_model,
             expires_at=self._index.expiry_for_ttl(effective_ttl),
         )

@@ -79,8 +79,33 @@ def langchain_message_codec() -> tuple[Any, Any]:
 
     from langchain_core.load.serializable import Serializable  # noqa: PLC0415
 
+    def _load(payload: Any) -> Any:
+        """Reconstruct a LangChain object, tolerating un-loadable sub-objects.
+
+        ``dumpd`` never fails: for a sub-object LangChain cannot serialise (for
+        example a provider tool-call type embedded in a tool-calling
+        ``AIMessage``'s ``additional_kwargs``) it emits a
+        ``{"type": "not_implemented", ...}`` placeholder. ``load`` normally
+        *refuses* such a payload with ``NotImplementedError``; passing
+        ``ignore_unserializable_fields=True`` makes it **skip** those nodes and
+        still rebuild the real message (its ``content`` / ``type`` etc.), which
+        is what a cache hit needs. ``allowed_objects="messages"`` scopes
+        reconstruction to chat-message types — the correct, safe default for
+        untrusted cached content (and it silences the pending-deprecation
+        warning about that default).
+        """
+        return load(
+            payload,
+            allowed_objects="messages",
+            ignore_unserializable_fields=True,
+        )
+
     def _encode(value: Any) -> Any:
-        # A LangChain Serializable (message, etc.) → a marked, encoded payload.
+        # Any LangChain Serializable (messages, and lists of them such as a
+        # graph state's ``messages`` field) is wrapped as a marked, encoded
+        # payload. ``dumpd`` always succeeds; the tolerant ``_load`` above
+        # handles any embedded un-loadable sub-object on the way back, so a
+        # tool-calling message still rebuilds as a real message on a cache hit.
         if isinstance(value, Serializable):
             return {_LC_MARKER: dumpd(value)}
         if isinstance(value, dict):
@@ -92,7 +117,12 @@ def langchain_message_codec() -> tuple[Any, Any]:
     def _decode(value: Any) -> Any:
         if isinstance(value, dict):
             if _LC_MARKER in value and len(value) == 1:
-                return load(value[_LC_MARKER])
+                # A cache fault must never become an app fault: on any residual
+                # load failure, return the raw encoded payload rather than raise.
+                try:
+                    return _load(value[_LC_MARKER])
+                except Exception:  # noqa: BLE001 — best-effort, never fatal
+                    return value[_LC_MARKER]
             return {k: _decode(v) for k, v in value.items()}
         if isinstance(value, list):
             return [_decode(v) for v in value]

@@ -63,6 +63,80 @@ async def test_message_objects_round_trip_through_cache() -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_with_non_loadable_object_does_not_crash_on_load() -> None:
+    """A message embedding a non-LangChain-loadable object round-trips without crashing.
+
+    Regression for the tool-calling case: a real agent's cached ``AIMessage`` can
+    carry a provider tool-call object (e.g. a LiteLLM
+    ``ChatCompletionMessageToolCall``) in ``additional_kwargs``. ``dumpd`` marks
+    such objects ``not_implemented`` and ``load`` refuses them — so the codec
+    must NOT wrap a non-round-trippable message, letting it degrade to the
+    default serialization rather than crashing the cache read.
+    """
+    from langchain_core.messages import AIMessage
+
+    class _NotSerializable:
+        """A plain object LangChain cannot serialise/deserialise."""
+
+        def __repr__(self) -> str:
+            return "_NotSerializable()"
+
+    cache = _codec_cache()
+    # An AIMessage whose additional_kwargs holds a non-loadable object, mirroring
+    # a tool-call payload that isn't a LangChain Serializable.
+    msg = AIMessage(content="calling a tool", additional_kwargs={"tool_obj": _NotSerializable()})
+    state = {"messages": [msg], "ok": True}
+
+    # Store must succeed and, crucially, a subsequent load must not raise.
+    await cache.exact.set(["s"], state, scope="global", scope_id=None, ttl=60)
+    loaded = await cache.exact.get(["s"], scope="global", scope_id=None)
+
+    # The read completed (no NotImplementedError) and JSON-native content is intact.
+    assert loaded is not None
+    assert loaded["ok"] is True
+    # The message still rebuilds as a real AIMessage with its content — the
+    # un-loadable embedded sub-object is skipped rather than crashing or
+    # degrading the whole message to a dict.
+    restored = loaded["messages"][-1]
+    assert isinstance(restored, AIMessage)
+    assert restored.content == "calling a tool"
+
+
+@pytest.mark.asyncio
+async def test_semantic_path_round_trips_message_objects() -> None:
+    """The codec applies to the semantic cache layer too (store + hit).
+
+    Regression: a wrap_graph with ``semantic=True`` stores/loads through the
+    semantic cache, which is a different path than the exact cache. The per-call
+    codec must reach that path so a semantic hit reconstructs real message
+    objects rather than strings.
+    """
+    from langchain_core.messages import AIMessage
+
+    from tests.conftest import StubEmbedder, make_semantic_cache
+
+    serializer, deserializer = langchain_serde.langchain_message_codec()
+    cache = make_semantic_cache(StubEmbedder(), serializer=serializer, deserializer=deserializer)
+
+    state = {"messages": [AIMessage(content="semantic answer")]}
+    # Store via the combined flow (writes the semantic layer too).
+    await cache.store(["k"], "how do I reset my password?", state, scope="global", scope_id=None)
+
+    # A reworded query embeds to the same stub vector → semantic hit. The result
+    # must contain a real AIMessage, not a stringified one.
+    got = await cache.lookup(
+        ["different-key"],
+        "how do I reset my password?",
+        scope="global",
+        scope_id=None,
+    )
+    assert got is not None
+    restored = got["messages"][-1]
+    assert isinstance(restored, AIMessage)
+    assert restored.content == "semantic answer"
+
+
+@pytest.mark.asyncio
 async def test_wrap_graph_hit_replays_message_objects() -> None:
     """A wrap_graph cache hit returns message objects, matching the miss (Req 9.6).
 

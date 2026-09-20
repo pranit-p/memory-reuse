@@ -311,8 +311,12 @@ class MemoryCache:
             # Req 7.5 / 9.4: disabled or exact-only behaves exactly like Phase 1.
             return None
 
-        semantic_result = await self.semantic.get(
-            query_text, scope=scope, scope_id=scope_id, threshold=threshold
+        semantic_result = await self.semantic._get(  # noqa: SLF001
+            query_text,
+            scope,
+            scope_id,
+            threshold=threshold,
+            deserializer=effective_deser,
         )
         if semantic_result is not None and self._config.store_exact_on_semantic_hit:
             # Req 7.4: promote the semantic hit to the exact cache so the next
@@ -368,7 +372,9 @@ class MemoryCache:
         if exact_only or self.semantic is None:
             return
 
-        await self.semantic.set(query_text, value, scope=scope, scope_id=scope_id, ttl=ttl)
+        await self.semantic._set(  # noqa: SLF001
+            query_text, value, scope, scope_id, ttl=ttl, serializer=effective_ser
+        )
 
     # ------------------------------------------------------------------
     # Single-flight coalescing (Phase 6)
