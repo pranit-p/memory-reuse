@@ -13,6 +13,12 @@ _Nothing yet._
 
 ---
 
+## [0.7.0] — 2026-10-11
+
+_Nothing yet._
+
+---
+
 ## [0.6.1] — 2026-09-20
 
 ### Fixed
@@ -221,7 +227,8 @@ First public release. Phase 1 — exact caching.
 - Examples: basic exact cache, LangGraph agent, and a real LangGraph agent with a
   calculator and web-search tool.
 
-[Unreleased]: https://github.com/pranit-p/memory-reuse/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/pranit-p/memory-reuse/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.7.0
 [0.6.1]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.6.1
 [0.6.0]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.6.0
 [0.5.0]: https://github.com/pranit-p/memory-reuse/releases/tag/v0.5.0
