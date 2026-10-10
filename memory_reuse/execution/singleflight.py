@@ -26,6 +26,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from memory_reuse._utils import MISS
+
 logger = logging.getLogger(__name__)
 
 
@@ -91,15 +93,19 @@ class SingleFlight:
         Args:
             key: The cache key identifying the computation.
             compute: Async no-arg callable producing the value on a miss.
-            load: Async no-arg callable returning the cached value or ``None``.
+            load: Async no-arg callable returning the cached value, or the
+                :data:`~memory_reuse._utils.MISS` sentinel when absent (so a
+                cached false-like value is distinguishable from a miss).
             store: Async callable persisting a computed value under the key.
 
         Returns:
             The cached value on a hit, or the freshly computed value on a miss.
         """
-        # Fast path: an existing stored value never recomputes (Req 1.3).
+        # Fast path: an existing stored value never recomputes (Req 1.3). A
+        # miss is signalled by the ``MISS`` sentinel, not ``None``, so a cached
+        # false-like value (``None`` / ``0`` / ``""`` / ``[]``) is a hit.
         existing = await load()
-        if existing is not None:
+        if existing is not MISS:
             return existing
 
         # Attach to an in-flight computation for this key if one exists, so
@@ -196,7 +202,7 @@ class SingleFlight:
 
             # Another process holds the lock: it may have stored the value.
             existing = await load()
-            if existing is not None:
+            if existing is not MISS:
                 return existing  # reuse the holder's result (Req 2.2)
 
             if self._now() >= deadline:

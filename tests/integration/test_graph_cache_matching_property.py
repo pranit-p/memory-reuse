@@ -251,13 +251,15 @@ class TestProperty10ThresholdOverride:
         cache = make_semantic_cache(embedder, similarity_threshold=0.95)
 
         captured: dict[str, float | None] = {}
-        real_lookup = cache.lookup
+        # The graph wrapper calls the internal, sentinel-returning ``_lookup``
+        # (so a cached false-like result is served, not recomputed); spy there.
+        real_lookup = cache._lookup
 
         async def spy_lookup(*args: Any, **kwargs: Any) -> Any:
             captured["threshold"] = kwargs.get("threshold")
             return await real_lookup(*args, **kwargs)
 
-        cache.lookup = spy_lookup  # type: ignore[method-assign]
+        cache._lookup = spy_lookup  # type: ignore[method-assign]
 
         # With an explicit override the forwarded threshold is the override.
         with_override = cache.wrap_graph(StubGraph(), semantic=True, similarity_threshold=override)

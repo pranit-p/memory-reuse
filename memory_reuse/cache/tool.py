@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from memory_reuse._utils import (
+    MISS,
     build_cache_key,
     check_scope,
     deserialize_value,
@@ -71,9 +72,31 @@ class ToolCache:
         Returns:
             The cached return value, or ``None`` on a miss.
 
+            Note: this public method cannot distinguish a cache miss from a
+            stored ``None`` value — both return ``None``. The decorators use the
+            internal :meth:`_get`, which returns a sentinel on a miss, so a
+            cached false-like value is served as a hit.
+
         Raises:
             ScopeViolationError: If a non-global scope is requested without a
                 ``scope_id``.
+        """
+        result = await self._get(tool_name, args, scope, scope_id)
+        return None if result is MISS else result
+
+    async def _get(
+        self,
+        tool_name: str,
+        args: dict,
+        scope: str,
+        scope_id: str | None,
+    ) -> Any:
+        """Internal get returning the :data:`~memory_reuse._utils.MISS` sentinel on a miss.
+
+        Returns the stored value on a hit, or ``MISS`` (never ``None``) on a
+        miss, so a cached false-like value (``None`` / ``0`` / ``""`` / ``[]``)
+        is distinguishable from an absent entry. A corrupt entry is recorded and
+        treated as a miss rather than surfacing as a wrong value or raised error.
         """
         self._check_scope(scope, scope_id)
         key = self._build_key(tool_name, args, scope, scope_id)
@@ -83,16 +106,23 @@ class ToolCache:
         except Exception:
             self._stats.record_error()
             logger.debug("ToolCache: backend error on GET, treating as miss")
-            return None
+            return MISS
 
         if raw is None:
             self._stats.record_miss()
             logger.debug("ToolCache: MISS tool=%s scope=%s", tool_name, scope)
-            return None
+            return MISS
+
+        try:
+            value = deserialize_value(raw, deserializer=self._config.deserializer)
+        except Exception:
+            self._stats.record_error()
+            logger.debug("ToolCache: corrupt entry on GET, treating as miss")
+            return MISS
 
         self._stats.record_hit()
         logger.debug("ToolCache: HIT tool=%s scope=%s", tool_name, scope)
-        return deserialize_value(raw, deserializer=self._config.deserializer)
+        return value
 
     async def set(
         self,

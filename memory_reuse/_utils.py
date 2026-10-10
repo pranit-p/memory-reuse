@@ -9,10 +9,31 @@ import gzip
 import hashlib
 import json
 import re
+from enum import Enum
 from typing import Any
 
 # Characters allowed in cache key segments (alphanumeric, dash, underscore, dot)
 _SAFE_KEY_RE = re.compile(r"[^a-zA-Z0-9_\-.]")
+
+
+class _Sentinel(Enum):
+    """Singleton sentinel type distinguishing a cache miss from a cached ``None``.
+
+    A cached value can legitimately be any JSON value — including ``None``,
+    ``False``, ``0``, ``""`` or ``[]``. Using ``None`` to mean "miss" would make
+    those false-like cached values indistinguishable from an absent entry and
+    cause them to be recomputed on every lookup. The internal cache layers
+    therefore return :data:`MISS` (never ``None``) to signal an absent entry.
+
+    An :class:`~enum.Enum` member is used so the sentinel is a true singleton
+    that survives pickling / copying and type-narrows cleanly.
+    """
+
+    MISS = object()
+
+
+# The single miss sentinel instance used across the internal cache layers.
+MISS = _Sentinel.MISS
 
 
 def sanitize_key(key: str) -> str:
@@ -112,7 +133,12 @@ def check_scope(scope: str, scope_id: str | None) -> None:
         )
 
 
-def build_namespace(scope: str, scope_id: str | None, version: str | None = None) -> str:
+def build_namespace(
+    scope: str,
+    scope_id: str | None,
+    version: str | None = None,
+    operation: str | None = None,
+) -> str:
     """Build the vector-index namespace string for a scope.
 
     The namespace encodes the cache scope so a similarity search never crosses
@@ -129,8 +155,14 @@ def build_namespace(scope: str, scope_id: str | None, version: str | None = None
             onto the namespace so a semantic *search* is isolated per version — a
             vector stored under version A lives in a different namespace than one
             stored under version B and can never be returned as a match for it.
-            When ``None`` (the default) the namespace is byte-identical to the
-            pre-Phase-6 namespace, so existing vectors keep matching.
+            When ``None`` (the default) the version segment is omitted.
+        operation: Optional operation identifier (tool/node/graph name) folded
+            into the namespace so a semantic search is isolated per operation.
+            Without it, two unrelated operations in the same scope would share a
+            single similarity space and one could return the other's cached
+            result merely because their query texts are similar. When ``None``
+            (the default) the operation segment is omitted, matching the
+            pre-isolation namespace so existing vectors keep matching.
 
     Returns:
         The namespace string.
@@ -141,9 +173,13 @@ def build_namespace(scope: str, scope_id: str | None, version: str | None = None
     """
     check_scope(scope, scope_id)
     base = "global" if scope == "global" else f"{scope}:{scope_id}"
-    if version is None:
-        return base
-    return f"v:{version}:{base}"
+    if version is not None:
+        base = f"v:{version}:{base}"
+    if operation is not None:
+        # Hash the operation id so arbitrary tool/node names never produce an
+        # unbounded or delimiter-colliding namespace segment.
+        base = f"op:{hash_value(operation)}:{base}"
+    return base
 
 
 def hash_value(value: Any) -> str:
@@ -222,27 +258,50 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return (cos + 1.0) / 2.0
 
 
-def serialize_value(value: Any, *, serializer: Any = None) -> bytes:
+def serialize_value(
+    value: Any, *, serializer: Any = None, coerce_unsupported: bool = False
+) -> bytes:
     """Serialise and gzip-compress a value for storage in the backend.
 
     Args:
         value: Any JSON-serialisable value.
         serializer: Optional callable that converts ``value`` into a JSON-native
             representation *before* the JSON/gzip step. When ``None`` (the
-            default) the value is serialised exactly as before — so behaviour is
-            byte-identical for callers that do not configure a hook. This is the
-            extension point that lets framework objects (for example LangChain
-            message objects) round-trip faithfully via a paired ``deserializer``.
+            default) the value is serialised as-is. This is the extension point
+            that lets framework objects (for example LangChain message objects)
+            round-trip faithfully via a paired ``deserializer``.
+        coerce_unsupported: When ``True``, a value JSON cannot represent is
+            coerced to its ``str()`` form instead of raising (the historical
+            ``default=str`` behaviour). This is a lossy, one-way degradation and
+            is reserved for callers that explicitly opt into it — for example a
+            wrapped graph with ``serialize_messages=False`` that documents the
+            degradation. Defaults to ``False`` so the general cache paths never
+            silently store a wrong value.
 
     Returns:
         gzip-compressed JSON bytes.
 
     Raises:
-        TypeError: If ``value`` cannot be JSON-serialised.
+        SerializationError: If ``value`` (after any ``serializer``) contains a
+            type JSON cannot represent and ``coerce_unsupported`` is ``False``.
+            Previously such values were silently coerced to their ``str()`` form,
+            storing a lossy value that could never round-trip; they now fail
+            explicitly so the caller (or the cache layer's error handling) treats
+            the value as uncacheable rather than caching garbage.
     """
     if serializer is not None:
         value = serializer(value)
-    raw = json.dumps(value, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+    default = str if coerce_unsupported else None
+    try:
+        raw = json.dumps(value, sort_keys=True, ensure_ascii=False, default=default).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        from memory_reuse.exceptions import SerializationError
+
+        raise SerializationError(
+            f"Value of type {type(value).__name__!r} is not JSON-serialisable "
+            "and no serializer converted it. Pass a CacheConfig.serializer / "
+            "deserializer pair to cache this type, or cache a JSON-native value."
+        ) from exc
     return gzip.compress(raw, compresslevel=6)
 
 
@@ -261,7 +320,10 @@ def deserialize_value(data: bytes, *, deserializer: Any = None) -> Any:
         The original Python object.
 
     Raises:
-        ValueError: If the data cannot be decompressed or parsed.
+        ValueError: If the data cannot be decompressed or parsed, or if the
+            ``deserializer`` fails to reconstruct the value. A :class:`ValueError`
+            is used (rather than a bespoke type) so the cache layers' existing
+            ``except Exception`` guards treat a corrupt entry as a safe miss.
     """
     try:
         raw = gzip.decompress(data)
@@ -269,7 +331,12 @@ def deserialize_value(data: bytes, *, deserializer: Any = None) -> Any:
     except Exception as exc:
         raise ValueError(f"Failed to deserialise cached value: {exc}") from exc
     if deserializer is not None:
-        return deserializer(obj)
+        try:
+            return deserializer(obj)
+        except Exception as exc:
+            # A deserializer that chokes on a stored entry must not surface as a
+            # wrong value: raise so the caller treats it as a corrupt miss.
+            raise ValueError(f"Deserializer failed to reconstruct cached value: {exc}") from exc
     return obj
 
 

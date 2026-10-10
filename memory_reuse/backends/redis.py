@@ -44,9 +44,20 @@ class RedisBackend(AbstractBackend):
         data = await backend.get("key")
     """
 
-    def __init__(self, url: str, max_connections: int = _MAX_CONNECTIONS) -> None:
+    def __init__(
+        self,
+        url: str,
+        max_connections: int = _MAX_CONNECTIONS,
+        *,
+        key_prefix: str | None = None,
+    ) -> None:
         self._url = url
         self._max_connections = max_connections
+        # The key prefix scopes :meth:`flush` so it only ever deletes this
+        # cache's own keys, never unrelated application data or another cache
+        # instance's keys sharing the same Redis database. ``None`` keeps the
+        # historical behaviour available only via :meth:`flush_database`.
+        self._key_prefix = key_prefix
         self._client: aioredis.Redis | None = None  # type: ignore[type-arg]
 
     # ------------------------------------------------------------------
@@ -177,11 +188,45 @@ class RedisBackend(AbstractBackend):
             raise BackendConnectionError("Redis EXISTS operation failed") from exc
 
     async def flush(self) -> None:
-        """Delete all keys in the current Redis database.
+        """Delete only this cache's keys from the current Redis database.
+
+        Unlike a raw ``FLUSHDB``, this removes **only** keys under the configured
+        key prefix (``<key_prefix>:*``), using a non-blocking ``SCAN`` cursor and
+        batched ``DELETE`` / ``UNLINK`` so unrelated application keys — and the
+        keys of another cache instance sharing the same database — are never
+        touched. TTLs on surviving keys are unaffected.
+
+        When no key prefix was supplied to the backend this is a safe no-op (it
+        refuses to guess a scope rather than risk deleting unrelated data); use
+        :meth:`flush_database` for the explicit, unrestricted ``FLUSHDB``.
+
+        Raises:
+            BackendConnectionError: On Redis connectivity failure.
+        """
+        if not self._key_prefix:
+            logger.warning(
+                "RedisBackend.flush: no key_prefix configured; refusing to flush "
+                "the whole database. Use flush_database() for an explicit FLUSHDB."
+            )
+            return
+
+        client = await self._get_client()
+        pattern = f"{self._key_prefix}:*"
+        try:
+            deleted = await self._scan_delete(client, pattern)
+            logger.debug("RedisBackend: namespace flush removed %d key(s)", deleted)
+        except Exception as exc:
+            raise BackendConnectionError("Redis namespace flush failed") from exc
+
+    async def flush_database(self) -> None:
+        """Delete **every** key in the current Redis database via ``FLUSHDB``.
 
         Warning:
-            This calls ``FLUSHDB`` on the connected database. Use with care
-            in shared Redis environments.
+            This is the unrestricted, destructive flush — it removes all keys in
+            the connected database, including unrelated application data. Prefer
+            :meth:`flush`, which only clears this cache's namespace. Provided for
+            callers that genuinely own a dedicated database and want the fast,
+            atomic clear.
 
         Raises:
             BackendConnectionError: On Redis connectivity failure.
@@ -192,6 +237,41 @@ class RedisBackend(AbstractBackend):
             logger.debug("RedisBackend: database flushed")
         except Exception as exc:
             raise BackendConnectionError("Redis FLUSHDB operation failed") from exc
+
+    async def _scan_delete(self, client: aioredis.Redis, pattern: str) -> int:  # type: ignore[type-arg]
+        """Delete every key matching ``pattern`` via a batched SCAN sweep.
+
+        Iterates with ``scan_iter`` (a non-blocking cursor) and deletes in
+        batches so a large key set never blocks Redis or builds an unbounded
+        in-memory list. Uses ``UNLINK`` (lazy free) when available, falling back
+        to ``DELETE``.
+
+        Args:
+            client: The connected Redis client.
+            pattern: The ``MATCH`` glob, e.g. ``"memreuse:*"``.
+
+        Returns:
+            The number of keys deleted.
+        """
+        batch: list[bytes] = []
+        deleted = 0
+
+        async def _drop(keys: list[bytes]) -> int:
+            if not keys:
+                return 0
+            try:
+                return int(await client.unlink(*keys))
+            except Exception:
+                # Older Redis without UNLINK: fall back to DELETE.
+                return int(await client.delete(*keys))
+
+        async for key in client.scan_iter(match=pattern, count=500):
+            batch.append(key)
+            if len(batch) >= 500:
+                deleted += await _drop(batch)
+                batch = []
+        deleted += await _drop(batch)
+        return deleted
 
     async def ping(self) -> bool:
         """Check Redis connectivity.

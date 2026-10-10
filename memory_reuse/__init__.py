@@ -32,6 +32,7 @@ from memory_reuse.exceptions import (
     BackendNotAvailableError,
     InvalidTTLError,
     ScopeViolationError,
+    SerializationError,
 )
 from memory_reuse.stats import CacheStats
 
@@ -47,6 +48,7 @@ __all__ = [
     "BackendNotAvailableError",
     "ScopeViolationError",
     "InvalidTTLError",
+    "SerializationError",
 ]
 
 __version__ = "0.6.1"

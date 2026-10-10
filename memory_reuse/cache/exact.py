@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from memory_reuse._utils import (
+    MISS,
     build_cache_key,
     check_scope,
     deserialize_value,
@@ -72,11 +73,18 @@ class ExactCache:
         Returns:
             The cached value, or ``None`` on a cache miss.
 
+            Note: this public method cannot distinguish a cache miss from a
+            stored ``None`` value — both return ``None``. The internal
+            :meth:`~memory_reuse.core.MemoryCache.lookup` path uses a sentinel so
+            a cached ``None`` / ``0`` / ``""`` is served as a hit; callers that
+            need that distinction should use that path.
+
         Raises:
             ScopeViolationError: If ``scope`` requires a ``scope_id`` but
                 none is provided.
         """
-        return await self._get(key_parts, scope, scope_id, deserializer=self._config.deserializer)
+        result = await self._get(key_parts, scope, scope_id, deserializer=self._config.deserializer)
+        return None if result is MISS else result
 
     async def _get(
         self,
@@ -85,13 +93,18 @@ class ExactCache:
         scope_id: str | None,
         *,
         deserializer: Any = None,
-    ) -> Any | None:
+    ) -> Any:
         """Internal get that accepts a per-call deserializer override.
 
         The public :meth:`get` delegates here with the config's deserializer;
         callers that need a per-call override (for example a wrapped graph using
         the LangChain codec) pass their own without changing the public
         signature.
+
+        Returns the stored value on a hit, or the :data:`~memory_reuse._utils.MISS`
+        sentinel on a miss — never ``None`` for a miss — so a cached false-like
+        value (``None`` / ``0`` / ``""`` / ``[]``) is distinguishable from an
+        absent entry.
         """
         self._check_scope(scope, scope_id)
         key = self._build_key(key_parts, scope, scope_id)
@@ -101,16 +114,26 @@ class ExactCache:
         except Exception:
             self._stats.record_error()
             logger.debug("ExactCache: backend error on GET, treating as miss")
-            return None
+            return MISS
 
         if raw is None:
             self._stats.record_miss()
             logger.debug("ExactCache: MISS scope=%s", scope)
-            return None
+            return MISS
+
+        try:
+            value = deserialize_value(raw, deserializer=deserializer)
+        except Exception:
+            # A corrupt or undecodable entry must never surface as a wrong
+            # value or a raised error to the caller: record it and treat the
+            # lookup as a miss so the real computation re-runs and overwrites.
+            self._stats.record_error()
+            logger.debug("ExactCache: corrupt entry on GET, treating as miss")
+            return MISS
 
         self._stats.record_hit()
         logger.debug("ExactCache: HIT scope=%s", scope)
-        return deserialize_value(raw, deserializer=deserializer)
+        return value
 
     async def set(
         self,

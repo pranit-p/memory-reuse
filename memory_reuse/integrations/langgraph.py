@@ -16,7 +16,7 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
-from memory_reuse._utils import serialize_value
+from memory_reuse._utils import MISS, serialize_value
 from memory_reuse.exceptions import BackendNotAvailableError, ScopeViolationError
 
 if TYPE_CHECKING:
@@ -155,17 +155,22 @@ def cached_node(
 
             if semantic:
                 query_text = str(key_data)
-                cached = await cache.lookup(
+                cached = await cache._lookup(  # noqa: SLF001
                     key_parts,
                     query_text,
                     scope=scope,
                     scope_id=scope_id,
                     exact_only=exact_only,
+                    operation=func.__qualname__,
                 )
             else:
                 query_text = ""
-                cached = await cache.exact.get(key_parts, scope=scope, scope_id=scope_id)
-            if cached is not None:
+                cached = await cache.exact._get(  # noqa: SLF001
+                    key_parts, scope=scope, scope_id=scope_id
+                )
+            # ``MISS`` (not ``None``) is the miss signal, so a node that legitimately
+            # returns a false-like value is served from cache, not re-executed.
+            if cached is not MISS:
                 logger.debug("cached_node: HIT func=%s scope=%s", func.__qualname__, scope)
                 return cached
 
@@ -186,6 +191,7 @@ def cached_node(
                     scope_id=scope_id,
                     ttl=ttl,
                     exact_only=exact_only,
+                    operation=func.__qualname__,
                 )
             else:
                 await cache.exact.set(key_parts, result, scope=scope, scope_id=scope_id, ttl=ttl)
@@ -273,16 +279,21 @@ def cached_tool(
                 # path, while the query text is derived from the bound args.
                 key_parts = [tool_name, args_dict]
                 query_text = str(args_dict)
-                cached = await cache.lookup(
+                cached = await cache._lookup(  # noqa: SLF001
                     key_parts,
                     query_text,
                     scope=scope,
                     scope_id=scope_id,
                     exact_only=exact_only,
+                    operation=tool_name,
                 )
             else:
-                cached = await cache.tool.get(tool_name, args_dict, scope=scope, scope_id=scope_id)
-            if cached is not None:
+                cached = await cache.tool._get(  # noqa: SLF001
+                    tool_name, args_dict, scope=scope, scope_id=scope_id
+                )
+            # ``MISS`` (not ``None``) is the miss signal, so a tool that legitimately
+            # returns a false-like value is served from cache, not re-executed.
+            if cached is not MISS:
                 logger.debug("cached_tool: HIT func=%s scope=%s", tool_name, scope)
                 return cached
 
@@ -303,6 +314,7 @@ def cached_tool(
                     scope_id=scope_id,
                     ttl=ttl,
                     exact_only=exact_only,
+                    operation=tool_name,
                 )
             else:
                 await cache.tool.set(
@@ -496,8 +508,9 @@ class CachedGraph:
         scope_id = self._resolve_scope_id(state)
         key_parts, query_text = _derive_graph_key(state, self._key_fields, self._graph_id)
 
+        operation = f"graph:{self._graph_id}"
         if not bypass_cache:
-            cached = await self._cache.lookup(
+            cached = await self._cache._lookup(  # noqa: SLF001
                 key_parts,
                 query_text,
                 scope=self._scope,
@@ -506,8 +519,9 @@ class CachedGraph:
                 threshold=self._similarity_threshold,
                 serializer=self._serializer,
                 deserializer=self._deserializer,
+                operation=operation,
             )
-            if cached is not None:
+            if cached is not MISS:
                 logger.debug("CachedGraph: HIT graph=%s scope=%s", self._graph_id, self._scope)
                 return cached
 
@@ -525,6 +539,7 @@ class CachedGraph:
                 ttl=self._ttl,
                 exact_only=self._exact_only or not self._semantic,
                 serializer=self._serializer,
+                operation=operation,
             )
         return result
 
@@ -554,9 +569,10 @@ class CachedGraph:
         scope_id = self._resolve_scope_id(state)
         key_parts, query_text = _derive_graph_key(state, self._key_fields, self._graph_id)
 
+        operation = f"graph:{self._graph_id}"
         if not bypass_cache:
             cached = self._run_coro(
-                self._cache.lookup(
+                self._cache._lookup(  # noqa: SLF001
                     key_parts,
                     query_text,
                     scope=self._scope,
@@ -565,9 +581,10 @@ class CachedGraph:
                     threshold=self._similarity_threshold,
                     serializer=self._serializer,
                     deserializer=self._deserializer,
+                    operation=operation,
                 )
             )
-            if cached is not None:
+            if cached is not MISS:
                 logger.debug("CachedGraph: HIT graph=%s scope=%s", self._graph_id, self._scope)
                 return cached
 
@@ -586,6 +603,7 @@ class CachedGraph:
                     ttl=self._ttl,
                     exact_only=self._exact_only or not self._semantic,
                     serializer=self._serializer,
+                    operation=operation,
                 )
             )
         return result

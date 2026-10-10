@@ -74,6 +74,9 @@ class TestPublicSymbolSurface:
         "AnalyticsSnapshot",
         "CacheHitEvent",
         "PricingConfig",
+        # Additive export: explicit error raised instead of silently storing a
+        # lossy/wrong value for an unserialisable type. Nothing was removed.
+        "SerializationError",
     }
 
     def test_top_level_all_unchanged(self) -> None:
@@ -173,7 +176,9 @@ class TestMemoryCacheSignatures:
     def test_lookup_signature(self) -> None:
         params = inspect.signature(MemoryCache.lookup).parameters
         # Phase 6 appended optional serializer/deserializer overrides (default
-        # None), keeping the pre-Phase-6 params, order, and defaults intact.
+        # None). A later additive, keyword-only ``operation`` override (default
+        # None) was appended for per-operation semantic isolation — all
+        # pre-existing params, order, and defaults remain intact.
         assert list(params) == [
             "self",
             "key_parts",
@@ -184,6 +189,7 @@ class TestMemoryCacheSignatures:
             "threshold",
             "serializer",
             "deserializer",
+            "operation",
         ]
         for name in ("scope", "scope_id", "exact_only", "threshold"):
             assert params[name].kind is inspect.Parameter.KEYWORD_ONLY
@@ -192,10 +198,15 @@ class TestMemoryCacheSignatures:
         # Additive Phase 6 overrides default to None (no-op).
         assert params["serializer"].default is None
         assert params["deserializer"].default is None
+        # Additive operation override defaults to None (no-op, keyword-only).
+        assert params["operation"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert params["operation"].default is None
 
     def test_store_signature(self) -> None:
         params = inspect.signature(MemoryCache.store).parameters
-        # Phase 6 appended an optional serializer override (default None).
+        # Phase 6 appended an optional serializer override (default None); a
+        # later additive, keyword-only ``operation`` override (default None) was
+        # appended for per-operation semantic isolation.
         assert list(params) == [
             "self",
             "key_parts",
@@ -206,9 +217,12 @@ class TestMemoryCacheSignatures:
             "ttl",
             "exact_only",
             "serializer",
+            "operation",
         ]
         for name in ("scope", "scope_id", "ttl", "exact_only"):
             assert params[name].kind is inspect.Parameter.KEYWORD_ONLY
+        assert params["operation"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert params["operation"].default is None
         assert params["ttl"].default is None
         assert params["exact_only"].default is False
         assert params["serializer"].default is None

@@ -68,3 +68,14 @@ class ConfigurationError(AgentMemoryError):
     enabling ``semantic_enabled`` without selecting an
     ``embedding_provider``.
     """
+
+
+class SerializationError(AgentMemoryError):
+    """Raised when a value cannot be serialised for (or restored from) the cache.
+
+    The cache stores values as gzip-compressed JSON. A value containing a type
+    JSON cannot represent (and that no configured ``serializer`` converts) raises
+    this rather than being silently coerced to a lossy string — so an
+    unsupported value is never stored as a wrong value. It is also raised when a
+    stored entry cannot be decompressed or parsed back into a Python object.
+    """

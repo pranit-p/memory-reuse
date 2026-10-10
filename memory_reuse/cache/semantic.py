@@ -27,6 +27,7 @@ import logging
 from typing import Any
 
 from memory_reuse._utils import (
+    MISS,
     build_namespace,
     check_scope,
     cosine_similarity,
@@ -111,13 +112,14 @@ class SemanticCache:
             ScopeViolationError: If ``scope`` requires a ``scope_id`` but none
                 is provided.
         """
-        return await self._get(
+        result = await self._get(
             query_text,
             scope,
             scope_id,
             threshold=threshold,
             deserializer=self._config.deserializer,
         )
+        return None if result is MISS else result
 
     async def _get(
         self,
@@ -127,6 +129,7 @@ class SemanticCache:
         *,
         threshold: float | None = None,
         deserializer: Any = None,
+        operation: str | None = None,
     ) -> Any | None:
         """Internal get that accepts a per-call deserializer override.
 
@@ -134,9 +137,15 @@ class SemanticCache:
         callers that need a per-call override (a wrapped graph using the
         LangChain codec) pass their own so a semantic hit reconstructs framework
         objects faithfully, not as strings.
+
+        ``operation`` isolates the search to a per-operation namespace so a
+        reworded match can only come from the *same* tool/node/graph, never an
+        unrelated one that happened to use similar query text.
         """
         check_scope(scope, scope_id)
-        namespace = build_namespace(scope, scope_id, self._config.cache_version)
+        namespace = build_namespace(
+            scope, scope_id, self._config.cache_version, operation=operation
+        )
         effective_threshold = self._effective_threshold(threshold)
 
         try:
@@ -147,7 +156,7 @@ class SemanticCache:
             self._stats.record_error()
             self._stats.record_miss()
             logger.debug("SemanticCache: embedding failed on GET, treating as miss")
-            return None
+            return MISS
 
         try:
             matches = await self._index.search(
@@ -157,16 +166,24 @@ class SemanticCache:
             self._stats.record_error()
             self._stats.record_miss()
             logger.debug("SemanticCache: index error on SEARCH, treating as miss")
-            return None
+            return MISS
 
         if not matches or matches[0].score < effective_threshold:
             self._stats.record_miss()
             logger.debug("SemanticCache: MISS scope=%s", scope)
-            return None
+            return MISS
+
+        try:
+            value = deserialize_value(matches[0].value, deserializer=deserializer)
+        except Exception:
+            # A corrupt stored vector value must not surface as a wrong result
+            # or a raised error: record it and treat the lookup as a miss.
+            self._stats.record_error()
+            logger.debug("SemanticCache: corrupt entry on GET, treating as miss")
+            return MISS
 
         self._stats.record_semantic_hit()
         logger.debug("SemanticCache: HIT scope=%s score=%.4f", scope, matches[0].score)
-        value = deserialize_value(matches[0].value, deserializer=deserializer)
 
         if self._config.extract_answer:
             value = await self._maybe_extract_answer(value, embedding)
@@ -219,15 +236,21 @@ class SemanticCache:
         ttl: int | None = None,
         precomputed_embedding: list[float] | None = None,
         serializer: Any = None,
+        operation: str | None = None,
     ) -> None:
         """Internal set that accepts a per-call serializer override.
 
         The public :meth:`set` delegates here with the config's serializer;
         callers that need a per-call override pass their own so a stored semantic
         entry round-trips framework objects faithfully.
+
+        ``operation`` isolates the stored vector to a per-operation namespace so
+        it can only be matched by a later lookup for the *same* operation.
         """
         check_scope(scope, scope_id)
-        namespace = build_namespace(scope, scope_id, self._config.cache_version)
+        namespace = build_namespace(
+            scope, scope_id, self._config.cache_version, operation=operation
+        )
 
         if precomputed_embedding is not None:
             embedding = precomputed_embedding
@@ -242,9 +265,19 @@ class SemanticCache:
         effective_ttl = ttl if ttl is not None else self._config.default_ttl
         provider_model = self._embedder.identity
         record_id = hash_value([provider_model, query_text])
+
+        try:
+            serialised = serialize_value(value, serializer=serializer)
+        except Exception:
+            # An unserialisable value is skipped (recorded), never stored as a
+            # lossy/wrong value — consistent with ExactCache/ToolCache.
+            self._stats.record_error()
+            logger.debug("SemanticCache: value not serialisable on SET, skipping store")
+            return
+
         record = VectorRecord(
             vector=embedding,
-            value=serialize_value(value, serializer=serializer),
+            value=serialised,
             provider_model=provider_model,
             expires_at=self._index.expiry_for_ttl(effective_ttl),
         )

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import contextvars
 import inspect
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Literal
 
+from memory_reuse._utils import MISS as _MISS
 from memory_reuse.analytics import AnalyticsSnapshot, AnalyticsTracker, CacheHitEvent
 from memory_reuse.backends.base import AbstractBackend
 from memory_reuse.backends.memory import InMemoryBackend
@@ -29,6 +32,27 @@ if TYPE_CHECKING:
     from memory_reuse.vector.base import VectorIndex
 
 logger = logging.getLogger(__name__)
+
+# Shared immutable default for the request-context ContextVar. Using a single
+# frozen mapping as the default means every unset context reads the same empty
+# value without allocating, and updates always replace the mapping wholesale so
+# a reader never sees a partially mutated dict.
+_EMPTY_CONTEXT: dict[str, str | None] = {}
+
+
+def _lossy_json_serializer(value: Any) -> Any:
+    """Coerce a value to a JSON-native structure, stringifying unsupported types.
+
+    Reproduces the historical ``json.dumps(..., default=str)`` degradation, but
+    only for the ``wrap_graph(serialize_messages=False)`` opt-out that documents
+    it. A JSON round-trip with ``default=str`` turns any non-JSON object (e.g. a
+    LangChain message) into its string form, so the wrapped graph's result still
+    stores instead of raising. All other cache paths use the strict serializer
+    and never silently coerce.
+    """
+    import json as _json
+
+    return _json.loads(_json.dumps(value, default=str))
 
 
 class MemoryCache:
@@ -67,11 +91,16 @@ class MemoryCache:
         if config is None:
             config = CacheConfig(**kwargs) if kwargs else CacheConfig()
         self._config = config
-        self._context: dict[str, str | None] = {
-            "user_id": None,
-            "session_id": None,
-            "tenant_id": None,
-        }
+        # Request-scoped context (user/session/tenant) is stored in a
+        # ``ContextVar`` rather than a plain instance dict so concurrent
+        # requests sharing one ``MemoryCache`` never overwrite one another's
+        # context. Each asyncio task / thread sees its own value, and nested
+        # ``set_context`` calls restore the prior value on exit. The var holds
+        # an immutable mapping so a read never observes a half-written update.
+        self._context_var: contextvars.ContextVar[dict[str, str | None]] = contextvars.ContextVar(
+            f"memory_reuse_context_{id(self)}",
+            default=_EMPTY_CONTEXT,
+        )
 
         self._backend: AbstractBackend = self._create_backend()
         self._stats_tracker = StatsTracker()
@@ -147,6 +176,17 @@ class MemoryCache:
     # Context management
     # ------------------------------------------------------------------
 
+    @property
+    def _context(self) -> dict[str, str | None]:
+        """Current request-scoped context mapping (read-only view).
+
+        Backed by a :class:`contextvars.ContextVar` so concurrent requests
+        never share mutable context. Returns a fresh dict so callers that read
+        ``cache._context.get("user_id")`` keep working unchanged while being
+        unable to mutate the stored context in place.
+        """
+        return dict(self._context_var.get())
+
     def set_context(
         self,
         *,
@@ -160,6 +200,12 @@ class MemoryCache:
         scope ID is passed.  They do **not** affect calls that provide their
         own ``scope_id`` argument.
 
+        The context is stored in a :class:`contextvars.ContextVar`, so a value
+        set in one asyncio task (or thread) is **not** visible to a concurrently
+        running task. This prevents one request's ``user_id`` from leaking into
+        another request handled on the same shared :class:`MemoryCache`. Only
+        the arguments you pass are updated; others are preserved.
+
         Args:
             user_id: Identifier for the current user.
             session_id: Identifier for the current session.
@@ -169,20 +215,70 @@ class MemoryCache:
 
             cache.set_context(user_id="alice", session_id="sess-123")
         """
-        if user_id is not None:
-            self._context["user_id"] = user_id
-        if session_id is not None:
-            self._context["session_id"] = session_id
-        if tenant_id is not None:
-            self._context["tenant_id"] = tenant_id
+        self._context_var.set(
+            self._merged_context(user_id=user_id, session_id=session_id, tenant_id=tenant_id)
+        )
 
     def clear_context(self) -> None:
-        """Reset all context values to ``None``.
+        """Reset all context values to ``None`` for the current context.
 
         Call this between requests in a shared server context to avoid
-        leaking one user's context into another request.
+        leaking one user's context into another request. Because the context
+        lives in a :class:`contextvars.ContextVar`, this only clears the
+        calling task's view.
         """
-        self._context = {"user_id": None, "session_id": None, "tenant_id": None}
+        self._context_var.set(_EMPTY_CONTEXT)
+
+    @contextmanager
+    def context(
+        self,
+        *,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> Iterator[None]:
+        """Temporarily set the request context, restoring it on exit.
+
+        Unlike :meth:`set_context`, this scopes the change to a ``with`` block
+        and always restores the previous context afterwards — including when the
+        body raises — so nested or concurrent request handling cannot leave a
+        stale ``user_id`` behind.
+
+        Example::
+
+            with cache.context(user_id="alice"):
+                await do_work()   # sees user_id="alice"
+            # previous context restored here, even on exception
+        """
+        token = self._context_var.set(
+            self._merged_context(user_id=user_id, session_id=session_id, tenant_id=tenant_id)
+        )
+        try:
+            yield
+        finally:
+            self._context_var.reset(token)
+
+    def _merged_context(
+        self,
+        *,
+        user_id: str | None,
+        session_id: str | None,
+        tenant_id: str | None,
+    ) -> dict[str, str | None]:
+        """Build a new context mapping, overlaying provided values on the current one.
+
+        Returns a fresh dict (never mutates the stored mapping) so the update is
+        atomic from a reader's perspective.
+        """
+        current = self._context_var.get()
+        merged = dict(current)
+        if user_id is not None:
+            merged["user_id"] = user_id
+        if session_id is not None:
+            merged["session_id"] = session_id
+        if tenant_id is not None:
+            merged["tenant_id"] = tenant_id
+        return merged
 
     # ------------------------------------------------------------------
     # Stats
@@ -264,6 +360,7 @@ class MemoryCache:
         threshold: float | None = None,
         serializer: Callable[[Any], Any] | None = None,
         deserializer: Callable[[Any], Any] | None = None,
+        operation: str | None = None,
     ) -> Any | None:
         """Look up a cached value, trying the exact cache before the semantic cache.
 
@@ -289,13 +386,60 @@ class MemoryCache:
             deserializer: Optional per-call deserializer override applied to the
                 exact-cache read. Falls back to the configured deserializer when
                 ``None``.
+            operation: Optional operation identifier (tool/node/graph name) that
+                isolates the **semantic** search to that operation's own
+                similarity space. The decorators pass their stable operation
+                identity so a reworded match can only come from the same
+                tool/node/graph, never an unrelated one with similar query text.
+                When ``None`` (the default) the semantic namespace is scoped only
+                by scope/version, matching the pre-isolation behaviour — so a
+                caller managing its own keys can still match purely on
+                ``query_text`` within a scope.
 
         Returns:
             The cached value on an exact or semantic hit, or ``None`` on a miss.
 
+            Note: a cache miss and a stored ``None`` value both return ``None``
+            here. The decorators use the internal :meth:`_lookup`, which returns
+            a sentinel on a miss, so a cached false-like value is served as a hit
+            and not recomputed.
+
         Raises:
             ScopeViolationError: If ``scope`` requires a ``scope_id`` but none
                 is provided.
+        """
+        result = await self._lookup(
+            key_parts,
+            query_text,
+            scope=scope,
+            scope_id=scope_id,
+            exact_only=exact_only,
+            threshold=threshold,
+            serializer=serializer,
+            deserializer=deserializer,
+            operation=operation,
+        )
+        return None if result is _MISS else result
+
+    async def _lookup(
+        self,
+        key_parts: list,
+        query_text: str,
+        *,
+        scope: str,
+        scope_id: str | None,
+        exact_only: bool = False,
+        threshold: float | None = None,
+        serializer: Callable[[Any], Any] | None = None,
+        deserializer: Callable[[Any], Any] | None = None,
+        operation: str | None = None,
+    ) -> Any:
+        """Internal combined lookup returning the :data:`~memory_reuse._utils.MISS`
+        sentinel (never ``None``) on a miss.
+
+        Callers that must distinguish a cached false-like value from an absent
+        entry — the decorators and :meth:`get_or_compute` — use this directly.
+        The public :meth:`lookup` wraps it and converts the sentinel to ``None``.
         """
         effective_deser = deserializer if deserializer is not None else self._config.deserializer
         effective_ser = serializer if serializer is not None else self._config.serializer
@@ -303,13 +447,15 @@ class MemoryCache:
         exact_result = await self.exact._get(  # noqa: SLF001
             key_parts, scope, scope_id, deserializer=effective_deser
         )
-        if exact_result is not None:
+        if exact_result is not _MISS:
             # Req 7.2 / 11.1: an exact hit returns immediately, never embedding.
+            # ``_MISS`` (not ``None``) is the miss signal so a cached ``None`` /
+            # ``0`` / ``""`` / ``[]`` is served as a hit rather than recomputed.
             return exact_result
 
         if exact_only or self.semantic is None:
             # Req 7.5 / 9.4: disabled or exact-only behaves exactly like Phase 1.
-            return None
+            return _MISS
 
         semantic_result = await self.semantic._get(  # noqa: SLF001
             query_text,
@@ -317,8 +463,9 @@ class MemoryCache:
             scope_id,
             threshold=threshold,
             deserializer=effective_deser,
+            operation=operation,
         )
-        if semantic_result is not None and self._config.store_exact_on_semantic_hit:
+        if semantic_result is not _MISS and self._config.store_exact_on_semantic_hit:
             # Req 7.4: promote the semantic hit to the exact cache so the next
             # identical request takes the faster exact path.
             await self.exact._set(  # noqa: SLF001
@@ -337,6 +484,7 @@ class MemoryCache:
         ttl: int | None = None,
         exact_only: bool = False,
         serializer: Callable[[Any], Any] | None = None,
+        operation: str | None = None,
     ) -> None:
         """Store a value in the exact cache and, when enabled, the semantic cache.
 
@@ -359,6 +507,11 @@ class MemoryCache:
             serializer: Optional per-call serializer override. Falls back to the
                 configured serializer when ``None``. Used by ``wrap_graph``'s
                 automatic codec; most callers leave it ``None``.
+            operation: Optional operation identifier isolating the stored
+                **semantic** vector to that operation's namespace so it can only
+                be matched by a later lookup for the same operation. Must match
+                the ``operation`` passed to :meth:`lookup`. ``None`` (the
+                default) stores in the scope/version-only namespace.
 
         Raises:
             ScopeViolationError: If ``scope`` requires a ``scope_id`` but none
@@ -373,7 +526,13 @@ class MemoryCache:
             return
 
         await self.semantic._set(  # noqa: SLF001
-            query_text, value, scope, scope_id, ttl=ttl, serializer=effective_ser
+            query_text,
+            value,
+            scope,
+            scope_id,
+            ttl=ttl,
+            serializer=effective_ser,
+            operation=operation,
         )
 
     # ------------------------------------------------------------------
@@ -427,7 +586,10 @@ class MemoryCache:
             return result
 
         async def _load() -> Any:
-            return await self.lookup(
+            # Use the sentinel-returning internal lookup so a cached false-like
+            # value (``None`` / ``0`` / ``""`` / ``[]``) is treated as a hit and
+            # not recomputed. ``_MISS`` is the only miss signal.
+            return await self._lookup(
                 key_parts,
                 query_text,
                 scope=scope,
@@ -449,7 +611,7 @@ class MemoryCache:
         if self._single_flight is None:
             # No coalescing: plain miss → compute → store, matching Phase 5.
             existing = await _load()
-            if existing is not None:
+            if existing is not _MISS:
                 return existing
             value = await _compute()
             await _store(value)
@@ -618,17 +780,24 @@ class MemoryCache:
         """Resolve the (serializer, deserializer) a wrapped graph should use (Req 10).
 
         An explicit serializer configured on the cache always wins (Req 10.6).
-        Otherwise ``serialize_messages`` decides: ``False`` → the default (no
-        override); ``"auto"`` → the LangChain codec when importable, else the
-        default silently (Req 10.3); ``True`` → the LangChain codec, re-raising
-        the named error if LangChain is absent so the explicit intent is honoured.
+        Otherwise ``serialize_messages`` decides: ``False`` → the lossy
+        best-effort default (framework objects degrade to their string form, as
+        documented for the opt-out); ``"auto"`` → the LangChain codec when
+        importable, else that same lossy default silently (Req 10.3); ``True`` →
+        the LangChain codec, re-raising the named error if LangChain is absent so
+        the explicit intent is honoured.
         """
         # Req 10.6: an explicit config codec wins; the graph adds no override.
         if self._config.serializer is not None or self._config.deserializer is not None:
             return None, None
 
         if serialize_messages is False:
-            return None, None
+            # The documented opt-out: no faithful codec, framework objects
+            # degrade to strings. We supply an explicit lossy serializer rather
+            # than relying on the (now strict) default so this graph's results
+            # still store — while every other cache path stays strict and never
+            # silently coerces an unsupported value.
+            return _lossy_json_serializer, None
 
         from memory_reuse.integrations.langchain_serde import langchain_message_codec
 
@@ -724,14 +893,28 @@ class MemoryCache:
         logger.debug("MemoryCache: backend connections closed")
 
     async def flush(self) -> None:
-        """Flush **all** cached entries from the backend.
+        """Flush this cache's entries from the backend (and vector index).
+
+        On the Redis backend this clears only keys under the configured
+        ``key_prefix`` (and only vectors under the vector index's own prefix) via
+        a batched ``SCAN`` sweep, so unrelated application keys and other cache
+        instances sharing the database are never deleted. On the in-memory
+        backend it clears this instance's store.
+
+        When semantic caching is enabled the backing vector index is flushed too,
+        so a flush does not leave orphaned semantic entries behind.
 
         Warning:
-            This irreversibly removes every cached entry.  Use only in
-            development or test environments.
+            This irreversibly removes every cached entry for this cache.  Use
+            only in development or test environments.
         """
         await self._backend.flush()
-        logger.debug("MemoryCache: backend flushed")
+        if self.semantic is not None:
+            # The vector index is a separate store; clear it as well so no
+            # orphaned semantic entries survive the flush. The Redis index's
+            # flush is itself prefix-scoped (``memreuse:vec:*``).
+            await self.semantic._index.flush()  # noqa: SLF001
+        logger.debug("MemoryCache: cache flushed")
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -829,7 +1012,12 @@ class MemoryCache:
                         "Redis backend requires 'redis_url' in CacheConfig or "
                         "the MEMORY_REUSE_REDIS_URL environment variable."
                     )
-                return RedisBackend(url=self._config.redis_url)
+                # Pass the configured key prefix so ``flush()`` only ever clears
+                # this cache's own namespace, never unrelated keys in the DB.
+                return RedisBackend(
+                    url=self._config.redis_url,
+                    key_prefix=self._config.key_prefix,
+                )
             case "agentcore":
                 from memory_reuse.backends.agentcore import (
                     AgentCoreBackend,

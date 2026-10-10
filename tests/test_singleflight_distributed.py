@@ -17,6 +17,7 @@ from __future__ import annotations
 import pytest
 
 from memory_reuse import CacheConfig, MemoryCache
+from memory_reuse._utils import MISS
 from memory_reuse.backends.memory import InMemoryBackend
 from memory_reuse.exceptions import ConfigurationError
 from memory_reuse.execution import SingleFlight
@@ -64,8 +65,10 @@ async def test_holder_stores_and_second_caller_reads_it() -> None:
 
     store: dict[str, bytes] = {}
 
-    async def load() -> bytes | None:
-        return store.get("k")
+    async def load() -> object:
+        # The internal single-flight contract signals an absent entry with the
+        # MISS sentinel (not None) so a cached false-like value is a hit.
+        return store.get("k", MISS)
 
     async def do_store(v: bytes) -> None:
         store["k"] = v
@@ -92,8 +95,8 @@ async def test_lock_denied_falls_open_to_compute() -> None:
         calls["n"] += 1
         return b"computed-fallopen"
 
-    async def load() -> bytes | None:
-        return None  # holder never stores anything
+    async def load() -> object:
+        return MISS  # holder never stores anything (absent entry = MISS)
 
     async def do_store(v: bytes) -> None:
         pass
